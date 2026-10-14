@@ -1,0 +1,26 @@
+{
+  "name": "multiplayer",
+  "displayName": "Claude Multiplayer",
+  "description": "Pair two Claude Code sessions on the same local network. Both Claudes share a live-synced folder and can steer each other with short teammate messages.",
+  "author": {
+    "name": "Nicholas Dominici"
+  },
+  "license": "MIT",
+  "keywords": [
+    "multiplayer",
+    "pairing",
+    "lan",
+    "collaboration"
+  ],
+  "mcpServers": {
+    "multiplayer": {
+      "command": "sh",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/node.sh",
+        "${CLAUDE_PLUGIN_ROOT}/server/mcp.mjs"
+      ]
+    }
+  },
+  "homepage": "https://github.com/NicholasDominici/claude-multiplayer",
+  "repository": "https://github.com/NicholasDominici/claude-multiplayer"
+}

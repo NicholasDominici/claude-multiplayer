@@ -1,0 +1,14 @@
+{
+  "name": "claude-multiplayer",
+  "description": "Claude Multiplayer: pair two Claude Code sessions on the same local network.",
+  "owner": {
+    "name": "Nicholas Dominici"
+  },
+  "plugins": [
+    {
+      "name": "multiplayer",
+      "source": "./",
+      "description": "Pair two Claude Code sessions on the same local network: a live shared folder plus teammate messages that steer the other Claude."
+    }
+  ]
+}
