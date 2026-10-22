@@ -1,11 +1,13 @@
 // Core of Claude Multiplayer: LAN discovery, pairing, the encrypted peer link,
-// teammate messages, and notices into this Claude Code session.
+// teammate messages, and notices into this agent session (Claude Code, Codex,
+// or any MCP client).
 //
 // Flow: join() starts UDP beacons (multicast + broadcast) and a TCP listener.
 // Each side lists the sessions it hears, with a 6-digit code derived from an
 // X25519 key exchange. When a user confirms the code, pair() dials the peer and
 // sends a sealed "accept". The link goes live when both sides have accepted.
-// Live messages from the peer go into Claude through the native inbox socket.
+// Live messages from the peer go into the agent: pushed through Claude Code's
+// inbox socket when there is one, otherwise queued for the next tool result.
 import crypto from 'node:crypto';
 import dgram from 'node:dgram';
 import fs from 'node:fs';
@@ -35,6 +37,7 @@ const MAX_LINE_CHARS = 40 * 1024 * 1024;
 const MAX_INBOUND_PER_HOUR = 40;
 const ACCEPT_NOTICE_DELAY_MS = Number(process.env.MULTIPLAYER_ACCEPT_NOTICE_MS) || 15_000;
 const FOUND_NOTICE_DELAY_MS = Number(process.env.MULTIPLAYER_FOUND_NOTICE_MS) || 2_500;
+const MAX_PENDING = 200;
 
 /** The plugin version from plugin.json, shown to peers so a mismatch can name both versions. */
 export const PLUGIN_VERSION = (() => {
@@ -63,6 +66,28 @@ function cleanName(value) {
   const name = String(value ?? '').replace(/[^\p{L}\p{N} ._'-]/gu, '').trim().slice(0, 32);
   return name || 'Teammate';
 }
+
+/** Normalizes an agent id such as "claude-code" or "codex-mcp-client". */
+function cleanAgent(value) {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 32);
+}
+
+/** Human name for an agent id. */
+export function agentLabel(agent) {
+  if (/claude/.test(agent)) return 'Claude Code';
+  if (/codex/.test(agent)) return 'Codex';
+  if (/cursor/.test(agent)) return 'Cursor';
+  if (/gemini/.test(agent)) return 'Gemini CLI';
+  return agent || 'agent';
+}
+
+/** "Bob's Codex", "Bob's Claude Code" */
+function agentOf(c) {
+  return `${c.name}'s ${agentLabel(c.agent)}`;
+}
+
+/** How a user starts multiplayer, for messages that the other side reads. */
+const START_HINT = 'the multiplayer skill (/multiplayer:multiplayer in Claude Code, $multiplayer in Codex)';
 
 function slug(value) {
   return String(value).toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'peer';
@@ -105,7 +130,7 @@ function lanInterfaces() {
 function hint(err) {
   if (!err) return '';
   if (/EHOSTUNREACH|ENETUNREACH|EPERM|EACCES|EADDRNOTAVAIL/.test(err)) {
-    return ' On macOS this usually means Local Network access is off: open System Settings > Privacy & Security > Local Network and turn it on for the app that runs Claude Code (Claude, Terminal, iTerm, VS Code), then call multiplayer_join again.';
+    return ' On macOS this usually means Local Network access is off: open System Settings > Privacy & Security > Local Network and turn it on for the app that runs your coding agent (Claude, Codex, Terminal, iTerm, VS Code), then call multiplayer_join again.';
   }
   return '';
 }
@@ -119,7 +144,15 @@ export class Multiplayer {
     this.stateDir = process.env.MULTIPLAYER_STATE_DIR || path.join(os.homedir(), '.claude-multiplayer');
     this.beaconDir = path.join(this.stateDir, 'beacons');
     this.logFile = path.join(this.stateDir, 'logs', `${this.id}.log`);
-    this.inbox = findInboxSocket();
+    // Push: messages go into the running session through Claude Code's inbox
+    // socket. Pull: they wait in `pending` and ride along on the next
+    // multiplayer tool result, so any MCP client can take part.
+    this.inbox = process.env.MULTIPLAYER_NO_INBOX === '1' ? null : findInboxSocket();
+    this.delivery = this.inbox ? 'push' : 'pull';
+    this.agentOverride = cleanAgent(process.env.MULTIPLAYER_AGENT);
+    this.agent = this.agentOverride || (this.inbox ? 'claude-code' : 'unknown');
+    this.pending = [];
+    this.inboxWaiters = new Set();
 
     this.state = 'idle'; // idle | searching | live | disconnected | left
     this.candidates = new Map();
@@ -155,6 +188,12 @@ export class Multiplayer {
     this.pendingReceipts = new Map();
     this.disconnectNoticeSent = false;
     this.leaving = false;
+  }
+
+  /** Takes the agent id from the MCP client's initialize request. */
+  setClient(clientInfo) {
+    if (this.agentOverride) return;
+    this.agent = cleanAgent(clientInfo?.name) || this.agent;
   }
 
   log(msg) {
@@ -249,7 +288,7 @@ export class Multiplayer {
   /** multiplayer_message: send one teammate message, paced by LIMITS. */
   async message({ text, delivery } = {}) {
     if (this.state !== 'live' || !this.liveConn) {
-      const why = this.state === 'disconnected' ? `The link to ${this.peer?.name} is down; it reconnects on its own.` : 'Not paired yet. Run /multiplayer:multiplayer first.';
+      const why = this.state === 'disconnected' ? `The link to ${this.peer?.name} is down; it reconnects on its own.` : `Not paired yet. Start ${START_HINT} first.`;
       return { error: true, text: `Not sent. ${why}` };
     }
     const body = String(text ?? '').trim();
@@ -276,7 +315,7 @@ export class Multiplayer {
         return {
           error: true,
           text:
-            `Not sent: wait ${s}s before the next ${delivery} message. Each message interrupts ${this.peer.name}'s Claude, so batch this with your next update` +
+            `Not sent: wait ${s}s before the next ${delivery} message. Each message interrupts ${agentOf(this.peer)}, so batch this with your next update` +
             (delivery === 'steer' ? ', send it as fyi if it can wait,' : '') +
             ` or write it to ${path.join(this.sharedDir, 'NOTES.md')}.`,
         };
@@ -297,13 +336,20 @@ export class Multiplayer {
 
     const r = await receipt;
     this.pendingReceipts.delete(id);
-    const peerName = this.peer.name;
-    if (!r) return { text: `Sent to ${peerName}'s Claude. No delivery receipt yet.` };
-    if (!r.ok) return { error: true, text: `Sent, but ${peerName}'s Claude Code could not take it: ${r.error}.` };
+    const who = agentOf(this.peer);
+    if (!r) return { text: `Sent to ${who}. No delivery receipt yet.` };
+    if (!r.ok) return { error: true, text: `Sent, but ${who} could not take it: ${r.error}.` };
+    if (r.queued) {
+      return {
+        text:
+          `Queued for ${who}. It reads the message the next time it calls a multiplayer tool` +
+          (delivery === 'steer' ? ', so this steer cannot interrupt it mid-turn.' : '.'),
+      };
+    }
     return {
       text: delivery === 'steer'
-        ? `Delivered to ${peerName}'s Claude. They read it after their current tool call.`
-        : `Delivered to ${peerName}'s Claude. They read it when their current turn ends.`,
+        ? `Delivered to ${who}. It reads it after its current tool call.`
+        : `Delivered to ${who}. It reads it when its current turn ends.`,
     };
   }
 
@@ -311,10 +357,14 @@ export class Multiplayer {
   status() {
     const lines = [];
     lines.push(`State: ${this.state}`);
-    lines.push(`This session: ${this.name ?? defaultName()} on ${this.host} (${this.myAddresses()})`);
-    lines.push(`Inbox socket: ${this.inbox ? 'ok' : 'missing (teammate messages cannot reach this Claude; needs Claude Code 2.1.224+)'}`);
+    lines.push(`This session: ${this.name ?? defaultName()} on ${this.host} (${this.myAddresses()}), agent ${agentLabel(this.agent)}`);
+    lines.push(
+      this.delivery === 'push'
+        ? 'Delivery: push (teammate messages arrive on their own, mid-turn for a steer)'
+        : `Delivery: pull (teammate messages wait until a multiplayer tool call; ${this.pending.length} waiting)`,
+    );
     if (this.peer) {
-      lines.push(`Teammate: ${this.peer.name} on ${this.peer.host} (${this.peer.ip}), code ${this.peer.code}`);
+      lines.push(`Teammate: ${agentOf(this.peer)} on ${this.peer.host} (${this.peer.ip}), code ${this.peer.code}, delivery ${this.peer.delivery}`);
     }
     if (this.sharedDir) lines.push(`Shared folder: ${this.sharedDir}`);
     if (this.sync) {
@@ -366,7 +416,7 @@ export class Multiplayer {
     this.disconnectNoticeSent = false;
   }
 
-  /** Called when Claude Code closes the server. */
+  /** Called when the agent closes the server. */
   async shutdown() {
     try {
       if (this.liveConn) {
@@ -404,14 +454,14 @@ export class Multiplayer {
     if (found.length === 0) {
       lines.push(
         'No other session found yet. This session keeps searching for 30 minutes. ' +
-          'Ask the teammate to run /multiplayer:multiplayer on their machine (same Wi-Fi or LAN), then call multiplayer_join again. ' +
+          `Ask the teammate to start ${START_HINT} on their machine (same Wi-Fi or LAN), then call multiplayer_join again. ` +
           `If discovery fails, the teammate can call multiplayer_join with address "${lanInterfaces()[0]?.address ?? 'this-ip'}:${this.port ?? TCP_PORT}".`,
       );
     } else {
       lines.push(`Found ${found.length} session${found.length > 1 ? 's' : ''}:`);
       for (const c of found) {
         const extra = c.peerAccepted ? ` (${c.name} already accepted)` : c.accepted ? ' (you accepted; waiting for them)' : '';
-        lines.push(`- peer_id: ${c.id}  name: ${c.name}  host: ${c.host}  ip: ${c.ip}  code: ${c.code}${extra}`);
+        lines.push(`- peer_id: ${c.id}  name: ${c.name}  host: ${c.host}  ip: ${c.ip}  agent: ${agentLabel(c.agent)}  code: ${c.code}${extra}`);
       }
       lines.push('Next: ask your user to check that the teammate\'s screen shows the same code, then call multiplayer_pair with that peer_id.');
     }
@@ -424,17 +474,26 @@ export class Multiplayer {
     if (errs.length) {
       for (const [k, v] of errs) lines.push(`Network problem (${k}): ${v}.${hint(v)}`);
     }
-    if (!this.inbox) lines.push('Warning: this session has no inbox socket, so teammate messages cannot reach this Claude. Update Claude Code to 2.1.224 or newer.');
+    if (this.delivery === 'pull') {
+      lines.push('This session uses pull delivery: notices and teammate messages wait until you call a multiplayer tool. To wait for the teammate, call multiplayer_join again.');
+    }
     return lines.join('\n');
   }
 
   liveSummary() {
-    return [
-      `Teammate: ${this.peer.name} on ${this.peer.host} (code ${this.peer.code}).`,
+    const lines = [
+      `Teammate: ${agentOf(this.peer)} on ${this.peer.host} (code ${this.peer.code}).`,
       `Shared folder (live two-way sync with ${this.peer.name}'s machine): ${this.sharedDir}`,
       `Coordination board: ${path.join(this.sharedDir, 'NOTES.md')}`,
       'Use multiplayer_message for anything the teammate must know soon. Their messages arrive in this session tagged [multiplayer].',
-    ].join('\n');
+    ];
+    if (this.delivery === 'pull') {
+      lines.push('This session uses pull delivery: teammate messages are added to the end of multiplayer tool results. Call multiplayer_inbox between steps of your work, and before you edit a shared file.');
+    }
+    if (this.peer.delivery === 'pull') {
+      lines.push(`${agentOf(this.peer)} uses pull delivery: your messages wait until it next calls a multiplayer tool, so a steer cannot interrupt it.`);
+    }
+    return lines.join('\n');
   }
 
   record(dir, text, delivery) {
@@ -442,18 +501,62 @@ export class Multiplayer {
     if (this.history.length > 100) this.history.splice(0, this.history.length - 100);
   }
 
-  /** Posts a notice from this server into this Claude session. */
+  /** Posts a notice from this server into this agent session. */
   notify(text, priority = 'later') {
     this.record('notice', text, priority === 'next' ? 'steer' : 'fyi');
-    deliverToClaude(this.inbox, `[multiplayer] ${text}`, { from: 'multiplayer', priority }).then((r) => {
-      if (!r.ok) this.log(`notice not delivered: ${r.error}`);
-    });
+    this.deliver(`[multiplayer] ${text}`, { from: 'multiplayer', priority });
+  }
+
+  /**
+   * Pushes content into the session when it has an inbox socket. Otherwise,
+   * or when the push fails, queues it for the next multiplayer tool result.
+   */
+  async deliver(content, opts) {
+    if (this.inbox) {
+      const r = await deliverToClaude(this.inbox, content, opts);
+      if (r.ok) return { ok: true };
+      this.log(`push failed, queued instead: ${r.error}`);
+    }
+    this.pending.push(content);
+    if (this.pending.length > MAX_PENDING) this.pending.splice(0, this.pending.length - MAX_PENDING);
+    for (const wake of this.inboxWaiters) wake();
+    return { ok: true, queued: true };
+  }
+
+  /** Removes and formats the queued messages and notices; '' when there are none. */
+  takePending() {
+    if (this.pending.length === 0) return '';
+    const items = this.pending.splice(0);
+    return [
+      `--- ${items.length} teammate message${items.length > 1 ? 's' : ''} and notice${items.length > 1 ? 's' : ''}, oldest first. Handle them like messages that arrive on their own. ---`,
+      ...items,
+    ].join('\n\n');
+  }
+
+  /** multiplayer_inbox: returns queued messages, waiting up to wait_seconds for one. */
+  async checkInbox({ wait_seconds } = {}) {
+    const waitMs = Math.max(0, Math.min(110, Number(wait_seconds ?? 0))) * 1000;
+    if (this.pending.length === 0 && waitMs > 0) {
+      await new Promise((resolve) => {
+        const done = () => {
+          clearTimeout(timer);
+          this.inboxWaiters.delete(done);
+          resolve();
+        };
+        const timer = setTimeout(done, waitMs);
+        this.inboxWaiters.add(done);
+      });
+    }
+    return { text: this.takePending() || 'No new teammate messages.' };
   }
 
   // ------------------------------------------------------------- discovery
 
   beacon() {
-    return { p: PROTO, v: PROTO_VERSION, ver: PLUGIN_VERSION, id: this.id, name: this.name, host: this.host, port: this.port, pub: this.identity.pub };
+    return {
+      p: PROTO, v: PROTO_VERSION, ver: PLUGIN_VERSION, id: this.id, name: this.name, host: this.host, port: this.port,
+      pub: this.identity.pub, agent: this.agent, delivery: this.delivery,
+    };
   }
 
   /** Says which side must update when a session speaks another protocol version. */
@@ -461,10 +564,10 @@ export class Multiplayer {
     const theirs = `${m.name} on ${m.host} runs Claude Multiplayer ${m.ver} (protocol ${m.v})`;
     const ours = `this session runs ${PLUGIN_VERSION} (protocol ${PROTO_VERSION})`;
     const who = m.v < PROTO_VERSION ? `${m.name} must update` : 'your user must update';
-    return `${theirs}, but ${ours}, so the two cannot pair. ${who}: run \`${UPDATE_COMMAND}\` in a terminal, then start a new Claude Code session and run /multiplayer:multiplayer again.`;
+    return `${theirs}, but ${ours}, so the two cannot pair. ${who}: update the multiplayer plugin (in Claude Code, run \`${UPDATE_COMMAND}\` in a terminal), start a new session, then start ${START_HINT} again.`;
   }
 
-  /** Records a session that speaks another protocol version, and tells Claude once. */
+  /** Records a session that speaks another protocol version, and tells the agent once. */
   onMismatch(b) {
     if (typeof b.id !== 'string' || !ID_RE.test(b.id) || b.id === this.id) return;
     let m = this.mismatches.get(b.id);
@@ -486,8 +589,8 @@ export class Multiplayer {
   }
 
   /**
-   * Tells this Claude about a new session while no multiplayer_join call is
-   * waiting, so Claude does not have to poll for the teammate.
+   * Tells this agent about a new session while no multiplayer_join call is
+   * waiting, so the agent does not have to poll for the teammate.
    */
   noticeFound(c) {
     if (c.foundNotified || this.state !== 'searching') return;
@@ -711,6 +814,9 @@ export class Multiplayer {
     }
     c.name = cleanName(b.name);
     c.host = String(b.host ?? '').replace(/[^\w.-]/g, '').slice(0, 64) || 'unknown';
+    // Versions before 0.3.0 send neither field, and they all run in Claude Code with push delivery.
+    c.agent = cleanAgent(b.agent) || 'claude-code';
+    c.delivery = b.delivery === 'pull' ? 'pull' : 'push';
     // Prefer a LAN address over loopback when a session is seen both ways.
     if (!c.ip || source !== 'local' || c.source === 'local') {
       c.ip = ip;
@@ -847,7 +953,7 @@ export class Multiplayer {
     }, PENDING_CONN_MAX_MS).unref?.();
     this.sendPlain(conn, {
       t: 'hello', p: PROTO, v: PROTO_VERSION, ver: PLUGIN_VERSION, id: this.id, name: this.name, host: this.host,
-      port: this.port, pub: this.identity.pub, nonce: conn.myNonce,
+      port: this.port, pub: this.identity.pub, nonce: conn.myNonce, agent: this.agent, delivery: this.delivery,
     });
   }
 
@@ -984,7 +1090,7 @@ export class Multiplayer {
         break;
       case 'rcpt': {
         const resolve = this.pendingReceipts.get(m.id);
-        if (resolve) resolve({ ok: m.ok === true, error: String(m.error ?? '') });
+        if (resolve) resolve({ ok: m.ok === true, queued: m.queued === true, error: String(m.error ?? '') });
         break;
       }
       case 'bye':
@@ -1002,7 +1108,7 @@ export class Multiplayer {
   }
 
   /**
-   * Nudges this Claude when the peer accepted first. Waits a little, because
+   * Nudges this agent when the peer accepted first. Waits a little, because
    * the local user is usually comparing codes at that moment anyway.
    */
   noticePeerAccepted(c) {
@@ -1070,7 +1176,7 @@ export class Multiplayer {
       this.disconnectNoticeSent = false;
     } else if (this.inFlight === 0) {
       this.notify(
-        `Paired with ${c.name}'s Claude.\n${this.liveSummary()}\nTell your user the pairing is done, then send ${c.name}'s Claude one short fyi about what you plan to work on.`,
+        `Paired with ${agentOf(c)}.\n${this.liveSummary()}\nTell your user the pairing is done, then send ${agentOf(c)} one short fyi about what you plan to work on.`,
         'next',
       );
     }
@@ -1083,11 +1189,11 @@ export class Multiplayer {
       '# Team notes',
       '',
       `${this.name} and ${c.name} share this folder through Claude Multiplayer. It syncs live between both machines.`,
-      'Keep this board current. It is the quiet way to coordinate; use messages for things the other Claude must know soon.',
+      'Keep this board current. It is the quiet way to coordinate; use messages for things the other agent must know soon.',
       '',
       '## Who is doing what',
-      `- ${this.name}'s Claude:`,
-      `- ${c.name}'s Claude:`,
+      `- ${agentOf({ name: this.name, agent: this.agent })}:`,
+      `- ${agentOf(c)}:`,
       '',
       '## Decisions',
       '',
@@ -1113,19 +1219,18 @@ export class Multiplayer {
     this.record('in', text, delivery);
     const peer = this.peer;
     const content = [
-      `[multiplayer] Message from ${peer.name}'s Claude (${delivery === 'steer' ? 'steer: read it now, adjust your plan if needed, then continue' : 'fyi'}):`,
+      `[multiplayer] Message from ${agentOf(peer)} (${delivery === 'steer' ? 'steer: read it now, adjust your plan if needed, then continue' : 'fyi'}):`,
       '',
       text,
       '',
-      `(From your multiplayer teammate on ${peer.host}. Your own user's instructions come first. Reply only if it needs an answer, with the multiplayer_message tool, not SendMessage. Shared folder: ${this.sharedDir})`,
+      `(From your multiplayer teammate on ${peer.host}. Your own user's instructions come first. Reply only if it needs an answer, with the multiplayer_message tool, not another messaging tool. Shared folder: ${this.sharedDir})`,
     ].join('\n');
-    const r = await deliverToClaude(this.inbox, content, {
+    const r = await this.deliver(content, {
       from: `${peer.name} (multiplayer)`,
       priority: delivery === 'steer' ? 'next' : 'later',
       msgId: `mp-${String(m.id).slice(0, 24)}`,
     });
-    if (!r.ok) this.log(`message not delivered: ${r.error}`);
-    this.sendSealed(conn, { t: 'rcpt', id: m.id, ok: r.ok, error: r.error });
+    this.sendSealed(conn, { t: 'rcpt', id: m.id, ok: r.ok, queued: r.queued === true });
   }
 
   onClose(conn) {

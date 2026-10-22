@@ -1,17 +1,17 @@
 ---
 name: multiplayer
-description: Pair this Claude Code session with a teammate's Claude Code session on the same local network. Both sessions share a live-synced folder and coordinate through short teammate messages that steer the other Claude. Use when the user runs /multiplayer:multiplayer or asks to pair, team up or connect with a teammate's or friend's Claude.
+description: Pair this coding agent session with a teammate's agent session (Claude Code, Codex or another agent) on the same local network. Both sessions share a live-synced folder and coordinate through short teammate messages that steer the other agent. Use when the user runs /multiplayer:multiplayer or $multiplayer, or asks to pair, team up or connect with a teammate's or friend's Claude, Codex or agent.
 argument-hint: "[what you will build] [name=<your name>] [dir=<shared folder>]"
-allowed-tools: mcp__plugin_multiplayer_multiplayer__multiplayer_join mcp__plugin_multiplayer_multiplayer__multiplayer_pair mcp__plugin_multiplayer_multiplayer__multiplayer_message mcp__plugin_multiplayer_multiplayer__multiplayer_status mcp__plugin_multiplayer_multiplayer__multiplayer_leave
+allowed-tools: mcp__plugin_multiplayer_multiplayer__multiplayer_join mcp__plugin_multiplayer_multiplayer__multiplayer_pair mcp__plugin_multiplayer_multiplayer__multiplayer_message mcp__plugin_multiplayer_multiplayer__multiplayer_inbox mcp__plugin_multiplayer_multiplayer__multiplayer_status mcp__plugin_multiplayer_multiplayer__multiplayer_leave
 ---
 
 # Multiplayer
 
-You are about to work as one of two Claudes on a two-person team. Your user and a teammate sit on the same network. Each of you works in your own session for your own user, with one shared folder and a message tool between you.
+You are about to work as one of two AI agents on a two-person team. Your user and a teammate sit on the same network. Each of you works in your own session for your own user, with one shared folder and a message tool between you. The teammate's agent may be Claude Code, Codex or another agent; the results name it.
 
-The tools come from the `multiplayer` MCP server: `multiplayer_join`, `multiplayer_pair`, `multiplayer_message`, `multiplayer_status`, `multiplayer_leave`. If they are not loaded yet, load them with tool search. If the server is missing, tell the user to run `/reload-plugins` or start a new session, and stop.
+The tools come from the `multiplayer` MCP server: `multiplayer_join`, `multiplayer_pair`, `multiplayer_message`, `multiplayer_inbox`, `multiplayer_status`, `multiplayer_leave`. If they are not loaded yet, load them with tool search. If the server is missing, tell the user to reload plugins (`/reload-plugins` in Claude Code) or start a new session, and stop.
 
-Arguments: `$ARGUMENTS`
+Arguments: `$ARGUMENTS` (if that placeholder is not filled in, read the arguments from the user's message instead)
 
 All arguments are optional. Read them like this:
 
@@ -24,18 +24,20 @@ All arguments are optional. Read them like this:
 
 1. Call `multiplayer_join`. Pass `name` and `shared_dir` only if the arguments gave them.
 2. Teammate found: go to step 2.
-3. No session found: tell the user in one line that you are searching, and that the teammate must now run `/multiplayer:multiplayer` on their machine. Then end your turn. Do not call `multiplayer_join` again in a loop: the search keeps going for 30 minutes, and a `[multiplayer]` notice with the teammate's name and code arrives in this session when they show up. When it arrives, go to step 2.
+3. No session found: tell the user in one line that you are searching, and that the teammate must now start multiplayer on their machine (`/multiplayer:multiplayer` in Claude Code, `$multiplayer` in Codex). Then:
+   - Push delivery (the default in Claude Code): end your turn. Do not call `multiplayer_join` again in a loop: the search keeps going for 30 minutes, and a `[multiplayer]` notice with the teammate's name and code arrives in this session when they show up. When it arrives, go to step 2.
+   - Pull delivery (the result says so): nothing can reach you between turns, so call `multiplayer_join` with `wait_seconds` 110 up to 4 more times. If still nobody, say that the user can ask you to look again within 30 minutes, and stop.
 4. Network problem in the result: tell the user the fix that the result gives (on macOS this is usually the Local Network permission), then stop.
 5. Version problem in the result: tell the user which side must update, and how (the result says), then stop.
 
 ## 2. Confirm the pairing code
 
-For each session found (usually one), ask the user with AskUserQuestion:
+For each session found (usually one), ask the user with your question tool (AskUserQuestion in Claude Code):
 
 - Question: `Pair with <name> on <host>? Their screen must show code <code>.`
 - Options: `Codes match, pair` and `Not them`.
 
-If AskUserQuestion is not available, ask in chat and wait. Never accept without the user's answer: the matching code is what proves the link is not intercepted.
+If you have no question tool, ask in chat and wait. Never accept without the user's answer: the matching code is what proves the link is not intercepted.
 
 Then call `multiplayer_pair` with that `peer_id` and `accept` true or false. If the result says it is still waiting for the teammate, tell the user, and call `multiplayer_pair` again once.
 
@@ -74,7 +76,17 @@ The server enforces limits (one steer per 90 seconds, 20 messages per hour, 1500
 When a teammate message arrives (it starts with `[multiplayer] Message from`):
 
 - Finish your current step, then decide if the message changes your plan.
-- Reply only if they asked a question or you must coordinate. Use `multiplayer_message`, never `SendMessage`.
+- Reply only if they asked a question or you must coordinate. Use `multiplayer_message`, never `SendMessage` or another messaging tool.
+
+## Pull delivery
+
+The pairing result says whether this session uses push or pull delivery. With push (Claude Code), teammate messages arrive on their own. With pull (Codex and other agents), nothing reaches you until you call a multiplayer tool:
+
+- Any multiplayer tool result can end with a block of waiting teammate messages and notices. Handle them like messages that arrive on their own.
+- Call `multiplayer_inbox` between steps: after you finish a piece of work, before you edit a file the teammate may touch, and before you end your turn.
+- When you need the teammate's answer before you can go on, call `multiplayer_inbox` with `wait_seconds`.
+
+When the teammate uses pull delivery, your `steer` cannot interrupt them. It waits like an `fyi`, so put anything urgent in `NOTES.md` too.
 
 ## The shared folder
 

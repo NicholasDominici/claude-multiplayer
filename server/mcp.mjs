@@ -1,6 +1,6 @@
-// MCP stdio server for Claude Multiplayer. Claude Code starts one per session.
-// It stays idle (no network use) until the user runs /multiplayer and Claude
-// calls multiplayer_join. Stdout carries only JSON-RPC; logs go to
+// MCP stdio server for Claude Multiplayer. The agent (Claude Code, Codex or any
+// MCP client) starts one per session. It stays idle (no network use) until the
+// user starts the multiplayer skill and the agent calls multiplayer_join. Stdout carries only JSON-RPC; logs go to
 // ~/.claude-multiplayer/logs/.
 import readline from 'node:readline';
 import { Multiplayer, LIMITS, PLUGIN_VERSION } from './multiplayer.mjs';
@@ -8,15 +8,18 @@ import { Multiplayer, LIMITS, PLUGIN_VERSION } from './multiplayer.mjs';
 const mp = new Multiplayer();
 
 const INSTRUCTIONS =
-  'Claude Multiplayer pairs this session with a teammate\'s Claude Code session on the same local network. ' +
-  'It does nothing until the user runs /multiplayer:multiplayer. Messages from the teammate arrive as messages from another Claude session that start with [multiplayer]; ' +
-  'answer them with multiplayer_message, never SendMessage.';
+  'Claude Multiplayer pairs this session with a teammate\'s coding agent session (Claude Code, Codex or another MCP client) on the same local network. ' +
+  'It does nothing until the user starts the multiplayer skill. Messages from the teammate start with [multiplayer]; ' +
+  'answer them with multiplayer_message, never another messaging tool.' +
+  (mp.delivery === 'pull'
+    ? ' Teammate messages are not pushed into this session: they are added to the end of multiplayer tool results, and multiplayer_inbox checks for new ones.'
+    : '');
 
 const TOOLS = [
   {
     name: 'multiplayer_join',
     description:
-      'Start looking for a teammate\'s Claude Code session on this local network (the /multiplayer:multiplayer skill drives this). ' +
+      'Start looking for a teammate\'s agent session (Claude Code, Codex or another agent) on this local network. The multiplayer skill drives this. ' +
       'Waits up to wait_seconds for other sessions that are also looking, then lists each one with a peer_id and a 6-digit pairing code. ' +
       'Searching continues in the background after the call returns, so call it again to keep waiting.',
     inputSchema: {
@@ -49,10 +52,11 @@ const TOOLS = [
   {
     name: 'multiplayer_message',
     description:
-      'Send a short message to your paired teammate\'s Claude. It lands in their session like a coworker tapping them on the shoulder, so use it the way a good engineer messages one close teammate. ' +
+      'Send a short message to your paired teammate\'s agent. It lands in their session like a coworker tapping them on the shoulder, so use it the way a good engineer messages one close teammate. ' +
       'Send one when you: claim a piece of shared work before you start it; finish or hand off something they depend on; change a shared interface, file layout or plan; hit a blocker or need a decision only they can make; or find something that changes their work. ' +
       'Be self-sufficient first: look things up and decide on your own when you can. Do not send acknowledgements, thanks, "on it", step-by-step progress or chat, and do not reply just to confirm. Put several points in one message. ' +
       'delivery "steer" reaches them after their current tool call, in the middle of their turn; use it only when they should change course now. delivery "fyi" waits until their current turn ends. ' +
+      'If their agent uses pull delivery, both wait until it next calls a multiplayer tool. ' +
       `Limits: ${LIMITS.maxChars} characters; one steer per ${LIMITS.steerGapMs / 1000}s; ${LIMITS.perHour} messages per hour; a reply to a message they just sent is always allowed. ` +
       'For long content, write a file in the shared folder and send its path. Use NOTES.md in the shared folder for status that does not need their attention now.',
     inputSchema: {
@@ -62,6 +66,20 @@ const TOOLS = [
         delivery: { type: 'string', enum: ['steer', 'fyi'], description: '"steer" interrupts their current turn; "fyi" waits until it ends.' },
       },
       required: ['text', 'delivery'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'multiplayer_inbox',
+    description:
+      'Check for teammate messages and multiplayer notices that are waiting for this session. ' +
+      'Every multiplayer tool result already ends with any waiting messages; this tool is for checking between steps when the session uses pull delivery, ' +
+      'or for waiting up to wait_seconds for the teammate to answer.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wait_seconds: { type: 'integer', minimum: 0, maximum: 110, description: 'How long to wait when nothing is waiting yet. Default 0.' },
+      },
       additionalProperties: false,
     },
   },
@@ -81,6 +99,7 @@ const HANDLERS = {
   multiplayer_join: (a) => mp.join(a),
   multiplayer_pair: (a) => mp.pair(a),
   multiplayer_message: (a) => mp.message(a),
+  multiplayer_inbox: (a) => mp.checkInbox(a),
   multiplayer_status: () => mp.status(),
   multiplayer_leave: () => mp.leave(),
 };
@@ -101,6 +120,7 @@ async function handle(line) {
 
   try {
     if (method === 'initialize') {
+      mp.setClient(params?.clientInfo);
       send({
         jsonrpc: '2.0',
         id,
@@ -120,7 +140,10 @@ async function handle(line) {
         return;
       }
       const out = await handler(params.arguments || {});
-      send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: out.text }], isError: out.error === true } });
+      // Pull delivery: queued teammate messages ride along on every tool result.
+      const waiting = mp.takePending();
+      const text = waiting ? `${out.text}\n\n${waiting}` : out.text;
+      send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }], isError: out.error === true } });
     } else if (method === 'ping') {
       send({ jsonrpc: '2.0', id, result: {} });
     } else {

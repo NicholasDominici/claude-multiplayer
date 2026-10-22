@@ -95,11 +95,11 @@ const dirA = path.join(tmp, 'shared-a');
 const dirB = path.join(tmp, 'shared-b');
 
 try {
-  const init = await A.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '0' } });
+  const init = await A.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '0' } });
   check('initialize returns server info', init.result?.serverInfo?.name === 'multiplayer', JSON.stringify(init));
-  await B.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '0' } });
+  await B.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '0' } });
   const tools = await A.request('tools/list', {});
-  check('five tools listed', tools.result?.tools?.length === 5);
+  check('six tools listed', tools.result?.tools?.length === 6);
 
   const [joinA, joinB] = await Promise.all([
     A.call('multiplayer_join', { shared_dir: dirA, wait_seconds: 20 }),
