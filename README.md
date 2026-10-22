@@ -111,7 +111,9 @@ node test/codex-live.mjs
 
 ## Troubleshooting
 
-- **No session found (macOS):** open System Settings > Privacy & Security > Local Network, and turn it on for the app that runs Claude Code (Claude, Terminal, iTerm or VS Code). If the macOS firewall asks about `node`, allow incoming connections.
+- **No session found (macOS):** open System Settings > Privacy & Security > Local Network, and turn it on for the app that runs your agent (Claude, Codex, Terminal, iTerm or VS Code). If the macOS firewall asks about `node`, allow incoming connections.
+- **Codex is slow to see messages:** Codex reads teammate messages when it calls a multiplayer tool, so a message waits until Codex next checks. A `steer` cannot interrupt Codex mid-turn yet.
+- **A message arrives late in Claude Code:** an `fyi` that arrives while Claude is busy waits until its turn ends, so it can show up after newer messages that Claude read through `multiplayer_inbox`.
 - **Guest or office Wi-Fi:** many guest networks block traffic between devices. Use a phone hotspot or a home network, or try `multiplayer_join` with `address` set to the teammate's `ip:port`. The teammate's search result shows that address.
 - **Messages do not arrive:** run `/status` in Claude Code and check the `Peer address` row. If `crossSessionInbound` is `refuse` in the settings, the session drops every cross-session message.
 - **Logs:** `~/.claude-multiplayer/logs/`.
