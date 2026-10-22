@@ -1,0 +1,27 @@
+{
+  "name": "multiplayer",
+  "version": "0.3.0",
+  "description": "Pair two coding agent sessions (Codex, Claude Code or both) on the same local network. Both agents share a live-synced folder and coordinate through short teammate messages.",
+  "author": {
+    "name": "Nicholas Dominici"
+  },
+  "homepage": "https://github.com/NicholasDominici/claude-multiplayer",
+  "repository": "https://github.com/NicholasDominici/claude-multiplayer",
+  "license": "MIT",
+  "keywords": ["multiplayer", "pairing", "lan", "collaboration", "codex", "claude"],
+  "skills": "./skills/",
+  "mcpServers": "./codex-mcp.json",
+  "interface": {
+    "displayName": "Multiplayer",
+    "shortDescription": "Pair your agent with a teammate's agent on the same network",
+    "longDescription": "Pair this Codex session with a teammate's Codex or Claude Code session on the same local network. Both agents share a live-synced folder and send each other short teammate messages.",
+    "developerName": "Nicholas Dominici",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://github.com/NicholasDominici/claude-multiplayer",
+    "defaultPrompt": [
+      "Use multiplayer to pair with my teammate.",
+      "Use multiplayer to pair with my teammate and split this task."
+    ]
+  }
+}

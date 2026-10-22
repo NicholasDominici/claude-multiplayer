@@ -1,15 +1,15 @@
 # Claude Multiplayer
 
-Pair two Claude Code sessions on the same local network. Each person keeps their own Claude, and the two Claudes work as a team:
+Pair two coding agent sessions on the same local network: Claude Code with Claude Code, Codex with Codex, or Claude Code with Codex. Each person keeps their own agent, and the two agents work as a team:
 
-- **Find each other:** both people run `/multiplayer:multiplayer`. The sessions find each other on the LAN with no setup.
+- **Find each other:** both people start multiplayer (`/multiplayer:multiplayer` in Claude Code, `$multiplayer` in Codex). The sessions find each other on the LAN with no setup.
 - **Confirm the pair:** each screen shows the same 6-digit code. Each user confirms it, and only then does the link open.
 - **Share a folder:** `~/claude-multiplayer/<pair-name>/` syncs live in both directions, and includes a `NOTES.md` coordination board.
-- **Steer each other:** `multiplayer_message` puts a short note into the other Claude's running session. A `steer` arrives between that Claude's tool calls. An `fyi` waits until its turn ends. The server limits how often a Claude can send, so the two Claudes talk like two coworkers and do not interrupt each other all day.
+- **Steer each other:** `multiplayer_message` sends a short note to the other agent. In Claude Code, a `steer` arrives between tool calls and an `fyi` waits until the turn ends. Codex reads messages the next time it calls a multiplayer tool (see "Agents" below). The server limits how often an agent can send, so the two agents talk like two coworkers and do not interrupt each other all day.
 
 ## Install
 
-Requirements: macOS or Linux, Claude Code 2.1.224 or newer, Node.js 18 or newer.
+Requirements: macOS or Linux, Node.js 18 or newer, and Claude Code 2.1.224 or newer, Codex CLI 0.160 or newer, or both.
 
 Run this in a terminal:
 
@@ -17,25 +17,23 @@ Run this in a terminal:
 curl -fsSL https://raw.githubusercontent.com/NicholasDominici/claude-multiplayer/main/install.sh | sh
 ```
 
-Then start a new Claude Code session, or run `/reload-plugins` in an open one.
+The installer finds Claude Code and Codex on this machine and installs `multiplayer@claude-multiplayer` into each one from this repo's plugin marketplace. Then start a new session. Run the installer again to update.
 
-The installer adds this repo as a plugin marketplace and installs `multiplayer@claude-multiplayer`. If you prefer, run the same two steps yourself in Claude Code:
+If you prefer, run the steps yourself.
 
-```text
-/plugin marketplace add NicholasDominici/claude-multiplayer
-```
-
-```text
-/plugin install multiplayer@claude-multiplayer
-```
-
-Update:
+Claude Code:
 
 ```bash
-claude plugin update multiplayer@claude-multiplayer
+claude plugin marketplace add NicholasDominici/claude-multiplayer && claude plugin install multiplayer@claude-multiplayer
 ```
 
-Both of you need compatible versions. If one side is too old, `/multiplayer:multiplayer` says who must update.
+Codex:
+
+```bash
+codex plugin marketplace add NicholasDominici/claude-multiplayer && codex plugin add multiplayer@claude-multiplayer
+```
+
+Both of you need compatible versions. If one side is too old, multiplayer says who must update.
 
 Earlier versions installed into `~/.claude/skills/multiplayer`. The installer moves that copy to `~/.claude-multiplayer/backups/`, because two copies of the plugin conflict.
 
@@ -43,14 +41,14 @@ Earlier versions installed into `~/.claude/skills/multiplayer`. The installer mo
 
 ## Use
 
-1. You run `/multiplayer:multiplayer`, optionally followed by what you want to build.
-2. Your teammate runs `/multiplayer:multiplayer`.
-3. Each Claude gets a notice with the other session's name and a code. Check that both screens show the same code, then choose **Codes match, pair**.
-4. The Claudes split the work, claim files in `NOTES.md`, and message each other when it matters. If you did not say what to build in step 1, your Claude asks.
+1. You start multiplayer, optionally followed by what you want to build: `/multiplayer:multiplayer build a CLI for our API` in Claude Code, or `$multiplayer build a CLI for our API` in Codex.
+2. Your teammate starts multiplayer in their agent.
+3. Each agent shows the other session's name, agent and a code. Check that both screens show the same code, then confirm.
+4. The agents split the work, claim files in `NOTES.md`, and message each other when it matters. If you did not say what to build in step 1, your agent asks.
 
 Arguments are optional, in any order:
 
-- Free text is the goal: `/multiplayer:multiplayer build a CLI for our API`.
+- Free text is the goal.
 - `name=Nick` sets the name your teammate sees (default: your git first name).
 - `dir=~/code/hackathon` sets the shared folder.
 
@@ -68,13 +66,15 @@ Arguments are optional, in any order:
 
 Files:
 
-- `SKILL.md`: the `/multiplayer:multiplayer` skill. It holds the pairing steps and the teammate etiquette.
+- `skills/multiplayer/SKILL.md`: the multiplayer skill, shared by Claude Code and Codex. It holds the pairing steps and the teammate etiquette.
+- `.claude-plugin/`: the Claude Code plugin and marketplace manifests. The MCP server is declared in `plugin.json`.
+- `.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`, `codex-mcp.json`: the Codex plugin, marketplace and MCP server. The server file is not named `.mcp.json`, because Claude Code would load that file too and start the server twice.
 - `server/mcp.mjs`: the MCP server and its tool descriptions.
 - `server/multiplayer.mjs`: discovery, pairing, the link, messages and notices.
 - `server/inbox.mjs`: push delivery into Claude Code.
 - `server/sync.mjs`: the folder mirror.
 - `server/crypto.mjs`: keys, codes and encryption.
-- `install.sh`: the installer (marketplace add, install or update, and migration from the old skills-folder copy).
+- `install.sh`: the installer for Claude Code and Codex (marketplace add, install or update, and migration from the old skills-folder copy).
 - `scripts/share.mjs`: serves the installer and this copy over the LAN.
 - `test/e2e.mjs`, `test/link.mjs`, `test/discovery.mjs`, `test/pull.mjs`: tests that run real servers on one machine.
 

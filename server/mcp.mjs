@@ -121,6 +121,7 @@ async function handle(line) {
   try {
     if (method === 'initialize') {
       mp.setClient(params?.clientInfo);
+      mp.log(`initialize: client ${params?.clientInfo?.name} ${params?.clientInfo?.version}, agent ${mp.agent}, delivery ${mp.delivery}`);
       send({
         jsonrpc: '2.0',
         id,

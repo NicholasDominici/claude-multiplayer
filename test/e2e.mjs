@@ -97,6 +97,8 @@ const dirB = path.join(tmp, 'shared-b');
 try {
   const init = await A.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '0' } });
   check('initialize returns server info', init.result?.serverInfo?.name === 'multiplayer', JSON.stringify(init));
+  const codexVersion = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin/plugin.json'), 'utf8')).version;
+  check('Claude and Codex manifests have the same version', init.result?.serverInfo?.version === codexVersion, `${init.result?.serverInfo?.version} vs ${codexVersion}`);
   await B.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '0' } });
   const tools = await A.request('tools/list', {});
   check('six tools listed', tools.result?.tools?.length === 6);

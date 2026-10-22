@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "multiplayer": {
+      "command": "/bin/sh",
+      "args": ["./bin/node.sh", "./server/mcp.mjs"],
+      "cwd": ".",
+      "env": {
+        "MULTIPLAYER_AGENT": "codex"
+      },
+      "default_tools_approval_mode": "approve"
+    }
+  }
+}
