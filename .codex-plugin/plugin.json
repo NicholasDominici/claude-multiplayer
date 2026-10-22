@@ -1,6 +1,6 @@
 {
   "name": "multiplayer",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Pair two coding agent sessions (Codex, Claude Code or both) on the same local network. Both agents share a live-synced folder and coordinate through short teammate messages.",
   "author": {
     "name": "Nicholas Dominici"

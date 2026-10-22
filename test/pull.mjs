@@ -135,6 +135,17 @@ try {
   const empty = await B.call('multiplayer_inbox');
   check('empty inbox says so', empty.text === 'No new teammate messages.', empty.text);
 
+  // A push session that waits in multiplayer_inbox gets the answer there, mid-turn.
+  const pushedBefore = inboxA.users().length;
+  const waitingA = A.call('multiplayer_inbox', { wait_seconds: 20 });
+  await sleep(500);
+  const r3 = await B.call('multiplayer_message', { text: 'Contract looks good.', delivery: 'fyi' });
+  check('sender is told the teammate was waiting', /which was waiting for it in multiplayer_inbox/.test(r3.text), r3.text);
+  const wA = await waitingA;
+  check('a waiting push session gets the message from multiplayer_inbox', /Message from Bob's Codex[\s\S]*Contract looks good/.test(wA.text), wA.text);
+  check('the message is not pushed a second time', inboxA.users().length === pushedBefore);
+  await A.call('multiplayer_message', { text: 'Thanks, starting the client now.', delivery: 'fyi' });
+
   // Alice's inbox socket goes away: her messages queue instead of being lost.
   await new Promise((r) => inboxA.server.close(r));
   fs.rmSync(inboxA.sockPath, { force: true });

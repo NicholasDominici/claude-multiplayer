@@ -74,7 +74,7 @@ const TOOLS = [
     description:
       'Check for teammate messages and multiplayer notices that are waiting for this session. ' +
       'Every multiplayer tool result already ends with any waiting messages; this tool is for checking between steps when the session uses pull delivery, ' +
-      'or for waiting up to wait_seconds for the teammate to answer.',
+      'or for waiting up to wait_seconds for the teammate to answer. While it waits, a new teammate message comes straight back as its result, with push or pull delivery.',
     inputSchema: {
       type: 'object',
       properties: {

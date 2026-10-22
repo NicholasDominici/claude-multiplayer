@@ -66,6 +66,8 @@ Send a message (`multiplayer_message`) when:
 
 Do not send acknowledgements, thanks, "on it", step-by-step progress, or chat. Do not reply only to confirm. Put several points into one message. In steady work, a few messages per hour is normal; at kickoff and at handoffs, more is fine.
 
+When you need the teammate's answer before you can go on, call `multiplayer_inbox` with `wait_seconds` (up to 110, and again if needed). While it waits, their next message comes straight back as its result. Otherwise do not wait: keep working, and their answer reaches you on its own.
+
 Choose the delivery:
 
 - `steer`: arrives after the teammate's current tool call, in the middle of their turn. Use it only when they should change course now (for example, they are about to edit the file you just changed).
@@ -84,7 +86,6 @@ The pairing result says whether this session uses push or pull delivery. With pu
 
 - Any multiplayer tool result can end with a block of waiting teammate messages and notices. Handle them like messages that arrive on their own.
 - Call `multiplayer_inbox` between steps: after you finish a piece of work, before you edit a file the teammate may touch, and before you end your turn.
-- When you need the teammate's answer before you can go on, call `multiplayer_inbox` with `wait_seconds`.
 
 When the teammate uses pull delivery, your `steer` cannot interrupt them. It waits like an `fyi`, so put anything urgent in `NOTES.md` too.
 

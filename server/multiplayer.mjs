@@ -339,6 +339,7 @@ export class Multiplayer {
     const who = agentOf(this.peer);
     if (!r) return { text: `Sent to ${who}. No delivery receipt yet.` };
     if (!r.ok) return { error: true, text: `Sent, but ${who} could not take it: ${r.error}.` };
+    if (r.waiting) return { text: `Delivered to ${who}, which was waiting for it in multiplayer_inbox.` };
     if (r.queued) {
       return {
         text:
@@ -508,11 +509,13 @@ export class Multiplayer {
   }
 
   /**
-   * Pushes content into the session when it has an inbox socket. Otherwise,
-   * or when the push fails, queues it for the next multiplayer tool result.
+   * Hands content to a multiplayer_inbox call that is waiting for it, else
+   * pushes it into the session when it has an inbox socket. Otherwise, or
+   * when the push fails, queues it for the next multiplayer tool result.
    */
   async deliver(content, opts) {
-    if (this.inbox) {
+    const waiting = this.inboxWaiters.size > 0;
+    if (this.inbox && !waiting) {
       const r = await deliverToClaude(this.inbox, content, opts);
       if (r.ok) return { ok: true };
       this.log(`push failed, queued instead: ${r.error}`);
@@ -520,7 +523,7 @@ export class Multiplayer {
     this.pending.push(content);
     if (this.pending.length > MAX_PENDING) this.pending.splice(0, this.pending.length - MAX_PENDING);
     for (const wake of this.inboxWaiters) wake();
-    return { ok: true, queued: true };
+    return { ok: true, queued: true, waiting };
   }
 
   /** Removes and formats the queued messages and notices; '' when there are none. */
@@ -1090,7 +1093,7 @@ export class Multiplayer {
         break;
       case 'rcpt': {
         const resolve = this.pendingReceipts.get(m.id);
-        if (resolve) resolve({ ok: m.ok === true, queued: m.queued === true, error: String(m.error ?? '') });
+        if (resolve) resolve({ ok: m.ok === true, queued: m.queued === true, waiting: m.waiting === true, error: String(m.error ?? '') });
         break;
       }
       case 'bye':
@@ -1230,7 +1233,7 @@ export class Multiplayer {
       priority: delivery === 'steer' ? 'next' : 'later',
       msgId: `mp-${String(m.id).slice(0, 24)}`,
     });
-    this.sendSealed(conn, { t: 'rcpt', id: m.id, ok: r.ok, queued: r.queued === true });
+    this.sendSealed(conn, { t: 'rcpt', id: m.id, ok: r.ok, queued: r.queued === true, waiting: r.waiting === true });
   }
 
   onClose(conn) {
