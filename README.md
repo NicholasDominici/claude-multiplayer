@@ -77,6 +77,7 @@ Files:
 - `install.sh`: the installer for Claude Code and Codex (marketplace add, install or update, and migration from the old skills-folder copy).
 - `scripts/share.mjs`: serves the installer and this copy over the LAN.
 - `test/e2e.mjs`, `test/link.mjs`, `test/discovery.mjs`, `test/pull.mjs`: tests that run real servers on one machine.
+- `test/codex-live.mjs`: the live Codex test.
 
 ## Test
 
@@ -101,6 +102,12 @@ node test/pull.mjs
 ```
 
 `e2e.mjs` pairs two real servers with fake inbox sockets and checks pairing, messages, pacing and folder sync. `--udp-only` forces LAN discovery. `link.mjs` checks decline, the delayed accept notice and reconnect. `discovery.mjs` checks the notice when a teammate shows up and the message when versions do not match. `pull.mjs` pairs a push session with a pull session and checks queued messages, `multiplayer_inbox` and the fallback when a push fails.
+
+Before a release, also run the live Codex test. It pairs a real `codex exec` session with a scripted Claude Code side and has Codex do a small task over the link. It uses your Codex login and a little Codex usage. Codex runs in a throwaway `CODEX_HOME` with the plugin installed from this repo, and the copy of your login is deleted when the test ends. Add `--keep` to keep the transcript and shared folders.
+
+```bash
+node test/codex-live.mjs
+```
 
 ## Troubleshooting
 
