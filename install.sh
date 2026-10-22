@@ -87,6 +87,6 @@ if [ -n "$HAVE_CLAUDE" ]; then
   echo "Claude Code: start a new session (or run /reload-plugins), then run /multiplayer:multiplayer."
 fi
 if [ -n "$HAVE_CODEX" ]; then
-  echo "Codex: start a new session, then type \$multiplayer."
+  echo "Codex: start a new session, open /hooks and trust the multiplayer hooks (once), then type \$multiplayer."
 fi
 echo "Run this installer again to update."

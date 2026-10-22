@@ -82,10 +82,12 @@ When a teammate message arrives (it starts with `[multiplayer] Message from`):
 
 ## Pull delivery
 
-The pairing result says whether this session uses push or pull delivery. With push (Claude Code), teammate messages arrive on their own. With pull (Codex and other agents), nothing reaches you until you call a multiplayer tool:
+The pairing result says whether this session uses push or pull delivery. With push, teammate messages arrive on their own: in Claude Code always, and in Codex once the user has trusted the multiplayer hooks in `/hooks` (a steer then arrives after your next tool call). With pull, nothing reaches you until you call a multiplayer tool:
 
 - Any multiplayer tool result can end with a block of waiting teammate messages and notices. Handle them like messages that arrive on their own.
 - Call `multiplayer_inbox` between steps: after you finish a piece of work, before you edit a file the teammate may touch, and before you end your turn.
+
+If the result asks you to, tell your user once how to trust the multiplayer hooks in Codex.
 
 When the teammate uses pull delivery, your `steer` cannot interrupt them. It waits like an `fyi`, so put anything urgent in `NOTES.md` too.
 

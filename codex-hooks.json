@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/bin/codex-hook.sh\" post-tool-use", "timeout": 5 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/bin/codex-hook.sh\" stop", "timeout": 5 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/bin/codex-hook.sh\" user-prompt-submit", "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}

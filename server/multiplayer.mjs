@@ -151,8 +151,13 @@ export class Multiplayer {
     this.delivery = this.inbox ? 'push' : 'pull';
     this.agentOverride = cleanAgent(process.env.MULTIPLAYER_AGENT);
     this.agent = this.agentOverride || (this.inbox ? 'claude-code' : 'unknown');
-    this.pending = [];
+    this.pending = []; // { content, priority: 'next' | 'later' }
     this.inboxWaiters = new Set();
+    // Codex push: the plugin's hooks ask this server for queued messages
+    // through a control socket named after the agent process.
+    this.ctl = null;
+    this.ctlPath = path.join(this.stateDir, 'ctl', `${process.ppid}.sock`);
+    this.hooked = false;
 
     this.state = 'idle'; // idle | searching | live | disconnected | left
     this.candidates = new Map();
@@ -213,6 +218,7 @@ export class Multiplayer {
     if (this.state === 'live') return { text: `Already paired with ${this.peer.name}.\n\n${this.liveSummary()}` };
 
     await this.ensureTcp();
+    if (!this.inbox) this.startControl();
     this.startSearch();
     if (address) this.dialAddress(String(address));
 
@@ -340,6 +346,13 @@ export class Multiplayer {
     if (!r) return { text: `Sent to ${who}. No delivery receipt yet.` };
     if (!r.ok) return { error: true, text: `Sent, but ${who} could not take it: ${r.error}.` };
     if (r.waiting) return { text: `Delivered to ${who}, which was waiting for it in multiplayer_inbox.` };
+    if (r.queued && r.hooked) {
+      return {
+        text: delivery === 'steer'
+          ? `Delivered to ${who}. It reads it after its next tool call, or with its next prompt if it is idle.`
+          : `Delivered to ${who}. It reads it when its current turn ends, or with its next prompt if it is idle.`,
+      };
+    }
     if (r.queued) {
       return {
         text:
@@ -361,7 +374,7 @@ export class Multiplayer {
     lines.push(`This session: ${this.name ?? defaultName()} on ${this.host} (${this.myAddresses()}), agent ${agentLabel(this.agent)}`);
     lines.push(
       this.delivery === 'push'
-        ? 'Delivery: push (teammate messages arrive on their own, mid-turn for a steer)'
+        ? `Delivery: push (teammate messages arrive on their own, mid-turn for a steer${this.hooked ? '; through the Codex hooks' : ''})`
         : `Delivery: pull (teammate messages wait until a multiplayer tool call; ${this.pending.length} waiting)`,
     );
     if (this.peer) {
@@ -419,6 +432,7 @@ export class Multiplayer {
 
   /** Called when the agent closes the server. */
   async shutdown() {
+    this.stopControl();
     try {
       if (this.liveConn) {
         this.leaving = true;
@@ -490,6 +504,9 @@ export class Multiplayer {
     ];
     if (this.delivery === 'pull') {
       lines.push('This session uses pull delivery: teammate messages are added to the end of multiplayer tool results. Call multiplayer_inbox between steps of your work, and before you edit a shared file.');
+      if (/codex/.test(this.agent)) {
+        lines.push('Tell your user once: in Codex, open /hooks and trust the multiplayer hooks, so teammate messages reach this session mid-turn without polling.');
+      }
     }
     if (this.peer.delivery === 'pull') {
       lines.push(`${agentOf(this.peer)} uses pull delivery: your messages wait until it next calls a multiplayer tool, so a steer cannot interrupt it.`);
@@ -520,20 +537,94 @@ export class Multiplayer {
       if (r.ok) return { ok: true };
       this.log(`push failed, queued instead: ${r.error}`);
     }
-    this.pending.push(content);
+    this.pending.push({ content, priority: opts?.priority === 'next' ? 'next' : 'later' });
     if (this.pending.length > MAX_PENDING) this.pending.splice(0, this.pending.length - MAX_PENDING);
     for (const wake of this.inboxWaiters) wake();
-    return { ok: true, queued: true, waiting };
+    return { ok: true, queued: true, waiting, hooked: this.hooked };
   }
 
-  /** Removes and formats the queued messages and notices; '' when there are none. */
-  takePending() {
-    if (this.pending.length === 0) return '';
-    const items = this.pending.splice(0);
+  /**
+   * Removes and formats queued messages and notices; '' when there are none.
+   * With onlySteers, takes only the ones that should interrupt the turn.
+   */
+  takePending(onlySteers = false) {
+    const take = (p) => !onlySteers || p.priority === 'next';
+    const items = this.pending.filter(take);
+    if (items.length === 0) return '';
+    this.pending = this.pending.filter((p) => !take(p));
     return [
       `--- ${items.length} teammate message${items.length > 1 ? 's' : ''} and notice${items.length > 1 ? 's' : ''}, oldest first. Handle them like messages that arrive on their own. ---`,
-      ...items,
+      ...items.map((p) => p.content),
     ].join('\n\n');
+  }
+
+  // ------------------------------------------------------------ codex hooks
+
+  /** Opens the control socket that this session's Codex hooks call. */
+  startControl() {
+    if (this.ctl) return;
+    try {
+      fs.mkdirSync(path.dirname(this.ctlPath), { recursive: true, mode: 0o700 });
+      fs.rmSync(this.ctlPath, { force: true });
+    } catch {}
+    this.ctl = net.createServer((sock) => {
+      let buf = '';
+      sock.setTimeout(3000, () => sock.destroy());
+      sock.on('error', () => {});
+      sock.on('data', (d) => {
+        buf += d;
+        const nl = buf.indexOf('\n');
+        if (nl < 0) return;
+        let req = {};
+        try {
+          req = JSON.parse(buf.slice(0, nl));
+        } catch {}
+        sock.end(JSON.stringify({ output: this.onHook(String(req.event ?? '')) }) + '\n');
+      });
+    });
+    this.ctl.on('error', (err) => this.log(`control socket: ${err.message}`));
+    this.ctl.listen(this.ctlPath, () => {
+      try {
+        fs.chmodSync(this.ctlPath, 0o600);
+      } catch {}
+    });
+  }
+
+  stopControl() {
+    try {
+      this.ctl?.close();
+    } catch {}
+    this.ctl = null;
+    try {
+      fs.rmSync(this.ctlPath, { force: true });
+    } catch {}
+  }
+
+  /**
+   * Answers one Codex hook: returns the hook's JSON output, or '' for none.
+   * post-tool-use hands over steers mid-turn, stop hands over the rest by
+   * continuing the turn, user-prompt-submit hands over what waited while idle.
+   */
+  onHook(event) {
+    if (!this.hooked) {
+      this.hooked = true;
+      this.delivery = 'push';
+      this.log(`codex hooks are live (${event}); delivery is now push`);
+      if (this.liveConn) this.sendSealed(this.liveConn, { t: 'caps', delivery: 'push' });
+    }
+    if (event === 'post-tool-use') {
+      const text = this.takePending(true);
+      return text ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: text } }) : '';
+    }
+    if (event === 'user-prompt-submit') {
+      const text = this.takePending();
+      return text ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } }) : '';
+    }
+    if (event === 'stop') {
+      const text = this.takePending();
+      return text ? JSON.stringify({ decision: 'block', reason: text }) : '';
+    }
+    return '';
   }
 
   /** multiplayer_inbox: returns queued messages, waiting up to wait_seconds for one. */
@@ -1093,9 +1184,12 @@ export class Multiplayer {
         break;
       case 'rcpt': {
         const resolve = this.pendingReceipts.get(m.id);
-        if (resolve) resolve({ ok: m.ok === true, queued: m.queued === true, waiting: m.waiting === true, error: String(m.error ?? '') });
+        if (resolve) resolve({ ok: m.ok === true, queued: m.queued === true, waiting: m.waiting === true, hooked: m.hooked === true, error: String(m.error ?? '') });
         break;
       }
+      case 'caps':
+        if (conn.live) c.delivery = m.delivery === 'push' ? 'push' : 'pull';
+        break;
       case 'bye':
         conn.peerSaidBye = true;
         conn.sock.end();
@@ -1233,7 +1327,7 @@ export class Multiplayer {
       priority: delivery === 'steer' ? 'next' : 'later',
       msgId: `mp-${String(m.id).slice(0, 24)}`,
     });
-    this.sendSealed(conn, { t: 'rcpt', id: m.id, ok: r.ok, queued: r.queued === true, waiting: r.waiting === true });
+    this.sendSealed(conn, { t: 'rcpt', id: m.id, ok: r.ok, queued: r.queued === true, waiting: r.waiting === true, hooked: r.hooked === true });
   }
 
   onClose(conn) {

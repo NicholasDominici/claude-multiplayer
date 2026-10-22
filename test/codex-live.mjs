@@ -7,8 +7,14 @@
 // this repo, and your auth.json is copied in and deleted again when the test
 // ends, pass or fail. Your own Codex config is not touched.
 //
-// Usage: node test/codex-live.mjs [--keep]
-//   --keep  keeps the work folder (Codex transcript and shared folders) for a look afterwards.
+// With --installed, Codex instead runs with your own CODEX_HOME and the plugin
+// as installed there, and the test checks that a steer interrupts Codex in the
+// middle of a slow task. That needs the multiplayer hooks to be trusted: start
+// Codex once, open /hooks, and trust them. Nothing is installed or copied.
+//
+// Usage: node test/codex-live.mjs [--keep] [--installed]
+//   --keep       keeps the work folder (Codex transcript and shared folders) for a look afterwards.
+//   --installed  uses your installed plugin and trusted hooks, and tests a mid-turn steer.
 // Env: CODEX_AUTH  path to the auth.json to copy (default: $CODEX_HOME/auth.json or ~/.codex/auth.json)
 import { spawn, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -20,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const keep = process.argv.includes('--keep');
+const installed = process.argv.includes('--installed');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (m) => console.log(`     ${new Date().toISOString().slice(11, 19)} ${m}`);
 let failures = 0;
@@ -39,7 +46,7 @@ function codexBin() {
 
 const codex = codexBin();
 const authSrc = process.env.CODEX_AUTH || path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'auth.json');
-if (!codex || !fs.existsSync(authSrc)) {
+if (!codex || (!installed && !fs.existsSync(authSrc))) {
   console.log(`SKIP codex-live: ${!codex ? 'codex is not installed' : `no Codex login at ${authSrc}`}`);
   process.exit(0);
 }
@@ -54,7 +61,7 @@ const work = path.join(tmp, 'work');
 const aliceDir = path.join(tmp, 'alice-shared');
 const bobDir = path.join(work, 'shared');
 const transcript = path.join(tmp, 'codex.jsonl');
-fs.mkdirSync(codexHome, { recursive: true });
+if (!installed) fs.mkdirSync(codexHome, { recursive: true });
 fs.mkdirSync(work, { recursive: true });
 
 const children = [];
@@ -67,12 +74,14 @@ function cleanup() {
 process.on('exit', cleanup);
 process.on('SIGINT', () => process.exit(130));
 
-// Codex side: a throwaway home with the plugin from this repo.
-fs.copyFileSync(authSrc, path.join(codexHome, 'auth.json'));
-fs.chmodSync(path.join(codexHome, 'auth.json'), 0o600);
-const codexEnv = { ...process.env, CODEX_HOME: codexHome };
-execFileSync(codex, ['plugin', 'marketplace', 'add', root], { env: codexEnv, stdio: 'ignore' });
-execFileSync(codex, ['plugin', 'add', 'multiplayer@claude-multiplayer'], { env: codexEnv, stdio: 'ignore' });
+// Codex side: a throwaway home with the plugin from this repo, or (--installed) your own setup.
+const codexEnv = installed ? { ...process.env } : { ...process.env, CODEX_HOME: codexHome };
+if (!installed) {
+  fs.copyFileSync(authSrc, path.join(codexHome, 'auth.json'));
+  fs.chmodSync(path.join(codexHome, 'auth.json'), 0o600);
+  execFileSync(codex, ['plugin', 'marketplace', 'add', root], { env: codexEnv, stdio: 'ignore' });
+  execFileSync(codex, ['plugin', 'add', 'multiplayer@claude-multiplayer'], { env: codexEnv, stdio: 'ignore' });
+}
 
 // Claude Code side: the real server with a fake inbox socket, driven by this script.
 const inbox = [];
@@ -122,13 +131,23 @@ const call = async (tool, args = {}) => (await request('tools/call', { name: too
 await request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: 'codex-live' } });
 await call('multiplayer_join', { shared_dir: aliceDir, wait_seconds: 0 });
 
-const prompt = [
+const pairing = [
   `Use the multiplayer skill ($multiplayer) with these arguments: name=${BOB} dir=${bobDir}`,
   `I am your user. I have already checked with my teammate that the pairing code matches, so pair with the session named ${ALICE} without asking me.`,
   'Ignore any other session you find.',
-  `After pairing, wait for a task from ${ALICE}'s agent: call multiplayer_inbox with wait_seconds 110, up to 4 times.`,
-  `Do the task, reply to ${ALICE} with multiplayer_message, then end. Do not call multiplayer_leave.`,
-].join('\n');
+];
+const prompt = (installed
+  ? [
+      ...pairing,
+      'After pairing, do this slow task: run the shell command `sleep 3` ten times, as ten separate shell commands, one after another. Do not call any multiplayer tool during the task.',
+      `Then write done.txt in the shared folder. Follow any message from ${ALICE}'s agent that arrives while you work. Do not call multiplayer_leave.`,
+    ]
+  : [
+      ...pairing,
+      `After pairing, wait for a task from ${ALICE}'s agent: call multiplayer_inbox with wait_seconds 110, up to 4 times.`,
+      `Do the task, reply to ${ALICE} with multiplayer_message, then end. Do not call multiplayer_leave.`,
+    ]
+).join('\n');
 const out = fs.openSync(transcript, 'w');
 const bob = spawn(codex, ['exec', '--json', '--skip-git-repo-check', '-C', work, '-s', 'workspace-write', '-c', 'approval_policy="never"', prompt], {
   env: codexEnv,
@@ -166,7 +185,25 @@ const until = async (fn, ms) => {
   return fn();
 };
 
-if (/^Paired with/.test(paired)) {
+if (/^Paired with/.test(paired) && installed) {
+  // Let Codex start the slow task, then steer it somewhere else.
+  await sleep(12_000);
+  const sent = await call('multiplayer_message', {
+    text: 'Stop the sleep task now. Instead write STOPPED.txt in the shared folder containing exactly: stopped. Then reply to me and end.',
+    delivery: 'steer',
+  });
+  check('the steer is delivered to hooked Codex (push, not queued)', /^Delivered to .*after its next tool call/.test(sent), sent);
+  const stoppedAt = Date.now();
+  const reply = await until(() => fromBob(/STOPPED|stopped/), 3 * 60_000);
+  const replyMs = Date.now() - stoppedAt;
+  check(`${BOB}'s Codex acts on the steer and replies`, !!reply);
+  await sleep(2500);
+  const stopped = path.join(aliceDir, 'STOPPED.txt');
+  check('STOPPED.txt synced to the Claude side', fs.existsSync(stopped) && fs.readFileSync(stopped, 'utf8').trim() === 'stopped');
+  check('Codex changed course mid-task instead of finishing the sleeps', !fs.existsSync(path.join(aliceDir, 'done.txt')) && replyMs < 30_000,
+    `done.txt exists: ${fs.existsSync(path.join(aliceDir, 'done.txt'))}, reply after ${replyMs} ms`);
+  await until(() => bobExit !== null, 60_000);
+} else if (/^Paired with/.test(paired)) {
   check(`${BOB}'s Codex sends a kickoff message`, !!(await until(() => fromBob(/./), 60_000)));
   const task = 'Please create hello.txt in the shared folder containing exactly the text: hi from codex. Reply to me when it is done.';
   const sent = await call('multiplayer_message', { text: task, delivery: 'steer' });
@@ -189,7 +226,7 @@ try {
   events = fs.readFileSync(transcript, 'utf8').split('\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
 } catch {}
 const toolCalls = events.filter((e) => e.type === 'item.completed' && e.item?.type === 'mcp_tool_call').map((e) => e.item.tool);
-check('Codex used multiplayer_inbox to wait', toolCalls.includes('multiplayer_inbox'), toolCalls.join(', '));
+if (!installed) check('Codex used multiplayer_inbox to wait', toolCalls.includes('multiplayer_inbox'), toolCalls.join(', '));
 check('no Codex tool call was refused', !events.some((e) => e.item?.type === 'mcp_tool_call' && e.item.error), JSON.stringify(events.filter((e) => e.item?.error).map((e) => e.item.error)));
 
 if (keep) console.log(`\nKept ${tmp} (Codex transcript: ${transcript}).`);
