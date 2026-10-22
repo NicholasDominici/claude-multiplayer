@@ -24,13 +24,13 @@ If you prefer, run the steps yourself.
 Claude Code:
 
 ```bash
-claude plugin marketplace add NicholasDominici/claude-multiplayer && claude plugin install multiplayer@claude-multiplayer
+claude plugin marketplace add https://github.com/NicholasDominici/claude-multiplayer.git && claude plugin install multiplayer@claude-multiplayer
 ```
 
 Codex:
 
 ```bash
-codex plugin marketplace add NicholasDominici/claude-multiplayer && codex plugin add multiplayer@claude-multiplayer
+codex plugin marketplace add https://github.com/NicholasDominici/claude-multiplayer.git && codex plugin add multiplayer@claude-multiplayer
 ```
 
 Both of you need compatible versions. If one side is too old, multiplayer says who must update.

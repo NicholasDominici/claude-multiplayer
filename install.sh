@@ -5,11 +5,11 @@
 # has exactly one copy and its own plugin update command keeps it current.
 # Usage: curl -fsSL https://raw.githubusercontent.com/NicholasDominici/claude-multiplayer/main/install.sh | sh
 # Env:
-#   MULTIPLAYER_SOURCE   marketplace source: GitHub owner/repo, git URL or local path
+#   MULTIPLAYER_SOURCE   marketplace source: git URL (HTTPS by default, so no GitHub SSH key is needed), owner/repo or local path
 #   MULTIPLAYER_TARBALL  URL of a plugin tarball (scripts/share.mjs sets this for LAN installs)
 set -eu
 
-SOURCE="${MULTIPLAYER_SOURCE:-NicholasDominici/claude-multiplayer}"
+SOURCE="${MULTIPLAYER_SOURCE:-https://github.com/NicholasDominici/claude-multiplayer.git}"
 MARKET="claude-multiplayer"
 PLUGIN="multiplayer@$MARKET"
 CONFIG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
