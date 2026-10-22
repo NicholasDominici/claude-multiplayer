@@ -1,7 +1,7 @@
 ---
 name: multiplayer
-description: Pair this Claude Code session with a teammate's Claude Code session on the same local network. Both sessions share a live-synced folder and coordinate through short teammate messages that steer the other Claude. Use when the user runs /multiplayer or asks to pair, team up or connect with a teammate's or friend's Claude.
-argument-hint: "[your name] [shared folder path]"
+description: Pair this Claude Code session with a teammate's Claude Code session on the same local network. Both sessions share a live-synced folder and coordinate through short teammate messages that steer the other Claude. Use when the user runs /multiplayer:multiplayer or asks to pair, team up or connect with a teammate's or friend's Claude.
+argument-hint: "[what you will build] [name=<your name>] [dir=<shared folder>]"
 allowed-tools: mcp__plugin_multiplayer_multiplayer__multiplayer_join mcp__plugin_multiplayer_multiplayer__multiplayer_pair mcp__plugin_multiplayer_multiplayer__multiplayer_message mcp__plugin_multiplayer_multiplayer__multiplayer_status mcp__plugin_multiplayer_multiplayer__multiplayer_leave
 ---
 
@@ -11,13 +11,22 @@ You are about to work as one of two Claudes on a two-person team. Your user and 
 
 The tools come from the `multiplayer` MCP server: `multiplayer_join`, `multiplayer_pair`, `multiplayer_message`, `multiplayer_status`, `multiplayer_leave`. If they are not loaded yet, load them with tool search. If the server is missing, tell the user to run `/reload-plugins` or start a new session, and stop.
 
-Arguments: `$ARGUMENTS` (optional: a display name, then an absolute shared folder path).
+Arguments: `$ARGUMENTS`
+
+All arguments are optional. Read them like this:
+
+- `name=<name>` is the display name to show the teammate.
+- `dir=<path>`, or any word that starts with `/` or `~/`, is the shared folder.
+- A single bare word with nothing else (for example `Nick`) is the display name.
+- Anything else is the goal: what your user wants the two of you to do. Keep it for step 3, and do not ask your user for it again.
 
 ## 1. Find the teammate
 
-1. Call `multiplayer_join`. Pass `name` if the arguments include one, and `shared_dir` if they include a path. Otherwise pass nothing.
-2. No session found: tell the user in one line that you are searching and that the teammate must run `/multiplayer` now. Call `multiplayer_join` again. Repeat up to 4 times. Then stop and say that the search keeps going for 30 minutes, and that a notice arrives when the teammate accepts.
-3. Network problem in the result: tell the user the fix that the result gives (on macOS this is usually the Local Network permission), then stop.
+1. Call `multiplayer_join`. Pass `name` and `shared_dir` only if the arguments gave them.
+2. Teammate found: go to step 2.
+3. No session found: tell the user in one line that you are searching, and that the teammate must now run `/multiplayer:multiplayer` on their machine. Then end your turn. Do not call `multiplayer_join` again in a loop: the search keeps going for 30 minutes, and a `[multiplayer]` notice with the teammate's name and code arrives in this session when they show up. When it arrives, go to step 2.
+4. Network problem in the result: tell the user the fix that the result gives (on macOS this is usually the Local Network permission), then stop.
+5. Version problem in the result: tell the user which side must update, and how (the result says), then stop.
 
 ## 2. Confirm the pairing code
 
@@ -35,8 +44,8 @@ Then call `multiplayer_pair` with that `peer_id` and `accept` true or false. If 
 When the result says `Paired with`:
 
 1. Tell the user the teammate's name and the shared folder path. If edits in that folder ask for permission, the user can run `/add-dir <path>`.
-2. If you do not know yet what the two of you will build, ask your user.
-3. Send one `fyi` with `multiplayer_message`: what your user wants, what you will take on, and a proposed split if the work is shared.
+2. If the arguments gave no goal and you do not know yet what the two of you will build, ask your user.
+3. Send one `fyi` with `multiplayer_message`: what your user wants (quote the goal from the arguments if there was one), what you will take on, and a proposed split if the work is shared.
 4. Write your line under "Who is doing what" in `NOTES.md` in the shared folder.
 
 ## How to be a good teammate (for the rest of the session)

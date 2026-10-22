@@ -2,7 +2,7 @@
 
 Pair two Claude Code sessions on the same local network. Each person keeps their own Claude, and the two Claudes work as a team:
 
-- **Find each other:** both people run `/multiplayer`. The sessions find each other on the LAN with no setup.
+- **Find each other:** both people run `/multiplayer:multiplayer`. The sessions find each other on the LAN with no setup.
 - **Confirm the pair:** each screen shows the same 6-digit code. Each user confirms it, and only then does the link open.
 - **Share a folder:** `~/claude-multiplayer/<pair-name>/` syncs live in both directions, and includes a `NOTES.md` coordination board.
 - **Steer each other:** `multiplayer_message` puts a short note into the other Claude's running session. A `steer` arrives between that Claude's tool calls. An `fyi` waits until its turn ends. The server limits how often a Claude can send, so the two Claudes talk like two coworkers and do not interrupt each other all day.
@@ -17,11 +17,9 @@ Run this in a terminal:
 curl -fsSL https://raw.githubusercontent.com/NicholasDominici/claude-multiplayer/main/install.sh | sh
 ```
 
-Then, in Claude Code, run `/reload-plugins` or start a new session. Run the same command again to update.
+Then start a new Claude Code session, or run `/reload-plugins` in an open one.
 
-The installer clones this repo into `~/.claude/skills/multiplayer`. Claude Code loads every folder there that has a `.claude-plugin/plugin.json` as a plugin, and the root `SKILL.md` becomes the `/multiplayer` command.
-
-**From the plugin marketplace (alternative):** in Claude Code, run these two commands. With this method the command is `/multiplayer:multiplayer`. Use only one install method, because two copies of the plugin conflict.
+The installer adds this repo as a plugin marketplace and installs `multiplayer@claude-multiplayer`. If you prefer, run the same two steps yourself in Claude Code:
 
 ```text
 /plugin marketplace add NicholasDominici/claude-multiplayer
@@ -31,16 +29,30 @@ The installer clones this repo into `~/.claude/skills/multiplayer`. Claude Code 
 /plugin install multiplayer@claude-multiplayer
 ```
 
-**Over the local network, without GitHub:** on a machine that has the plugin, run `node scripts/share.mjs`. It prints a `curl` command for the teammate.
+Update:
+
+```bash
+claude plugin update multiplayer@claude-multiplayer
+```
+
+Both of you need compatible versions. If one side is too old, `/multiplayer:multiplayer` says who must update.
+
+Earlier versions installed into `~/.claude/skills/multiplayer`. The installer moves that copy to `~/.claude-multiplayer/backups/`, because two copies of the plugin conflict.
+
+**Over the local network, without GitHub:** on a machine that has this repo, run `node scripts/share.mjs`. It prints a `curl` command for the teammate. That command runs the same installer, with this machine's copy as the marketplace.
 
 ## Use
 
-1. You run `/multiplayer`.
-2. Your teammate runs `/multiplayer`.
-3. Each Claude shows the other session's name and a code. Check that both screens show the same code, then choose **Codes match, pair**.
-4. Tell your Claude what the two of you will build. The Claudes split the work, claim files in `NOTES.md`, and message each other when it matters.
+1. You run `/multiplayer:multiplayer`, optionally followed by what you want to build.
+2. Your teammate runs `/multiplayer:multiplayer`.
+3. Each Claude gets a notice with the other session's name and a code. Check that both screens show the same code, then choose **Codes match, pair**.
+4. The Claudes split the work, claim files in `NOTES.md`, and message each other when it matters. If you did not say what to build in step 1, your Claude asks.
 
-Optional arguments: `/multiplayer Nick ~/code/hackathon` sets your display name and the shared folder.
+Arguments are optional, in any order:
+
+- Free text is the goal: `/multiplayer:multiplayer build a CLI for our API`.
+- `name=Nick` sets the name your teammate sees (default: your git first name).
+- `dir=~/code/hackathon` sets the shared folder.
 
 ## How it works
 
@@ -55,14 +67,15 @@ Optional arguments: `/multiplayer Nick ~/code/hackathon` sets your display name 
 
 Files:
 
-- `SKILL.md`: the `/multiplayer` skill. It holds the pairing steps and the teammate etiquette.
+- `SKILL.md`: the `/multiplayer:multiplayer` skill. It holds the pairing steps and the teammate etiquette.
 - `server/mcp.mjs`: the MCP server and its tool descriptions.
 - `server/multiplayer.mjs`: discovery, pairing, the link, messages and notices.
 - `server/inbox.mjs`: delivery into Claude Code.
 - `server/sync.mjs`: the folder mirror.
 - `server/crypto.mjs`: keys, codes and encryption.
-- `scripts/share.mjs`: the LAN installer.
-- `test/e2e.mjs`, `test/link.mjs`: tests that pair real servers on one machine.
+- `install.sh`: the installer (marketplace add, install or update, and migration from the old skills-folder copy).
+- `scripts/share.mjs`: serves the installer and this copy over the LAN.
+- `test/e2e.mjs`, `test/link.mjs`, `test/discovery.mjs`: tests that run real servers on one machine.
 
 ## Test
 
@@ -78,7 +91,11 @@ node test/e2e.mjs --udp-only
 node test/link.mjs
 ```
 
-`e2e.mjs` pairs two real servers with fake inbox sockets and checks pairing, messages, pacing and folder sync. `--udp-only` forces LAN discovery. `link.mjs` checks decline, the delayed accept notice and reconnect.
+```bash
+node test/discovery.mjs
+```
+
+`e2e.mjs` pairs two real servers with fake inbox sockets and checks pairing, messages, pacing and folder sync. `--udp-only` forces LAN discovery. `link.mjs` checks decline, the delayed accept notice and reconnect. `discovery.mjs` checks the notice when a teammate shows up and the message when versions do not match.
 
 ## Troubleshooting
 
@@ -87,4 +104,4 @@ node test/link.mjs
 - **Messages do not arrive:** run `/status` in Claude Code and check the `Peer address` row. If `crossSessionInbound` is `refuse` in the settings, the session drops every cross-session message.
 - **Logs:** `~/.claude-multiplayer/logs/`.
 
-The plugin uses the network only after `/multiplayer`. Every session that has the plugin enabled starts the small MCP server, and that server stays idle until then.
+The plugin uses the network only after `/multiplayer:multiplayer`. Every session that has the plugin enabled starts the small MCP server, and that server stays idle until then.

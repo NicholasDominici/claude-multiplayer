@@ -19,7 +19,8 @@ import { deliverToClaude, findInboxSocket } from './inbox.mjs';
 import { FolderSync } from './sync.mjs';
 
 const PROTO = 'claude-multiplayer';
-const PROTO_VERSION = 1;
+const PROTO_VERSION = Number(process.env.MULTIPLAYER_PROTO_VERSION) || 1;
+const UPDATE_COMMAND = 'claude plugin update multiplayer@claude-multiplayer';
 const DISCOVERY_PORT = Number(process.env.MULTIPLAYER_DISCOVERY_PORT) || 47823;
 const TCP_PORT = Number(process.env.MULTIPLAYER_TCP_PORT) || 47824;
 const MCAST_GROUP = '239.255.77.77';
@@ -33,6 +34,17 @@ const DEAD_LINK_MS = 45_000;
 const MAX_LINE_CHARS = 40 * 1024 * 1024;
 const MAX_INBOUND_PER_HOUR = 40;
 const ACCEPT_NOTICE_DELAY_MS = Number(process.env.MULTIPLAYER_ACCEPT_NOTICE_MS) || 15_000;
+const FOUND_NOTICE_DELAY_MS = Number(process.env.MULTIPLAYER_FOUND_NOTICE_MS) || 2_500;
+
+/** The plugin version from plugin.json, shown to peers so a mismatch can name both versions. */
+export const PLUGIN_VERSION = (() => {
+  try {
+    const manifest = new URL('../.claude-plugin/plugin.json', import.meta.url);
+    return String(JSON.parse(fs.readFileSync(manifest, 'utf8')).version || 'unknown');
+  } catch {
+    return 'unknown';
+  }
+})();
 
 /** Pacing for multiplayer_message: roughly how often a focused teammate pings a coworker. */
 export const LIMITS = {
@@ -111,6 +123,7 @@ export class Multiplayer {
 
     this.state = 'idle'; // idle | searching | live | disconnected | left
     this.candidates = new Map();
+    this.mismatches = new Map();
     this.conns = new Set();
     this.peer = null;
     this.liveConn = null;
@@ -236,7 +249,7 @@ export class Multiplayer {
   /** multiplayer_message: send one teammate message, paced by LIMITS. */
   async message({ text, delivery } = {}) {
     if (this.state !== 'live' || !this.liveConn) {
-      const why = this.state === 'disconnected' ? `The link to ${this.peer?.name} is down; it reconnects on its own.` : 'Not paired yet. Run /multiplayer first.';
+      const why = this.state === 'disconnected' ? `The link to ${this.peer?.name} is down; it reconnects on its own.` : 'Not paired yet. Run /multiplayer:multiplayer first.';
       return { error: true, text: `Not sent. ${why}` };
     }
     const body = String(text ?? '').trim();
@@ -382,10 +395,16 @@ export class Multiplayer {
   searchSummary() {
     const lines = [`Searching the local network as "${this.name}" on ${this.host} (${this.myAddresses()}).`];
     const found = this.visibleCandidates();
+    for (const c of found) c.shown = true;
+    const mismatched = [...this.mismatches.values()].filter((m) => Date.now() - m.seenAt < CANDIDATE_TTL_MS);
+    for (const m of mismatched) {
+      m.shown = true;
+      lines.push(`Version problem: ${this.mismatchText(m)}`);
+    }
     if (found.length === 0) {
       lines.push(
         'No other session found yet. This session keeps searching for 30 minutes. ' +
-          'Ask the teammate to run /multiplayer on their machine (same Wi-Fi or LAN), then call multiplayer_join again. ' +
+          'Ask the teammate to run /multiplayer:multiplayer on their machine (same Wi-Fi or LAN), then call multiplayer_join again. ' +
           `If discovery fails, the teammate can call multiplayer_join with address "${lanInterfaces()[0]?.address ?? 'this-ip'}:${this.port ?? TCP_PORT}".`,
       );
     } else {
@@ -434,7 +453,55 @@ export class Multiplayer {
   // ------------------------------------------------------------- discovery
 
   beacon() {
-    return { p: PROTO, v: PROTO_VERSION, id: this.id, name: this.name, host: this.host, port: this.port, pub: this.identity.pub };
+    return { p: PROTO, v: PROTO_VERSION, ver: PLUGIN_VERSION, id: this.id, name: this.name, host: this.host, port: this.port, pub: this.identity.pub };
+  }
+
+  /** Says which side must update when a session speaks another protocol version. */
+  mismatchText(m) {
+    const theirs = `${m.name} on ${m.host} runs Claude Multiplayer ${m.ver} (protocol ${m.v})`;
+    const ours = `this session runs ${PLUGIN_VERSION} (protocol ${PROTO_VERSION})`;
+    const who = m.v < PROTO_VERSION ? `${m.name} must update` : 'your user must update';
+    return `${theirs}, but ${ours}, so the two cannot pair. ${who}: run \`${UPDATE_COMMAND}\` in a terminal, then start a new Claude Code session and run /multiplayer:multiplayer again.`;
+  }
+
+  /** Records a session that speaks another protocol version, and tells Claude once. */
+  onMismatch(b) {
+    if (typeof b.id !== 'string' || !ID_RE.test(b.id) || b.id === this.id) return;
+    let m = this.mismatches.get(b.id);
+    if (!m) {
+      m = { id: b.id, shown: false, notified: false };
+      this.mismatches.set(b.id, m);
+    }
+    m.v = Number.isInteger(b.v) ? b.v : 0;
+    m.ver = String(b.ver ?? 'an older version').replace(/[^\w.+-]/g, '').slice(0, 32) || 'an older version';
+    m.name = cleanName(b.name);
+    m.host = String(b.host ?? '').replace(/[^\w.-]/g, '').slice(0, 64) || 'unknown';
+    m.seenAt = Date.now();
+    if (m.notified || this.state !== 'searching') return;
+    m.notified = true;
+    setTimeout(() => {
+      if (m.shown || this.state !== 'searching' || this.inFlight > 0) return;
+      this.notify(`Found a session, but it cannot pair: ${this.mismatchText(m)} Tell your user.`, 'next');
+    }, FOUND_NOTICE_DELAY_MS).unref?.();
+  }
+
+  /**
+   * Tells this Claude about a new session while no multiplayer_join call is
+   * waiting, so Claude does not have to poll for the teammate.
+   */
+  noticeFound(c) {
+    if (c.foundNotified || this.state !== 'searching') return;
+    c.foundNotified = true;
+    setTimeout(() => {
+      if (c.shown || c.accepted || c.rejected || c.peerRejected || this.state !== 'searching' || this.inFlight > 0) return;
+      if (!this.visibleCandidates().includes(c)) return;
+      c.shown = true;
+      this.notify(
+        `${c.name} on ${c.host} is looking for a teammate too. Their screen shows code ${c.code}. ` +
+          `Ask your user to check that the codes match. If they match, call multiplayer_pair with peer_id "${c.id}" and accept true; if not, call it with accept false.`,
+        'next',
+      );
+    }, FOUND_NOTICE_DELAY_MS).unref?.();
   }
 
   startSearch() {
@@ -603,9 +670,15 @@ export class Multiplayer {
     } catch {
       return;
     }
+    if (b?.p === PROTO && b.v !== PROTO_VERSION) {
+      this.onMismatch(b);
+      return;
+    }
     if (!this.validPeerInfo(b) || b.id === this.id) return;
     const c = this.upsertCandidate(b, ip, source);
-    if (c) c.seenAt = Date.now();
+    if (!c) return;
+    c.seenAt = Date.now();
+    this.noticeFound(c);
   }
 
   validPeerInfo(b) {
@@ -773,7 +846,7 @@ export class Multiplayer {
       if (!conn.live && !sock.destroyed) sock.destroy();
     }, PENDING_CONN_MAX_MS).unref?.();
     this.sendPlain(conn, {
-      t: 'hello', p: PROTO, v: PROTO_VERSION, id: this.id, name: this.name, host: this.host,
+      t: 'hello', p: PROTO, v: PROTO_VERSION, ver: PLUGIN_VERSION, id: this.id, name: this.name, host: this.host,
       port: this.port, pub: this.identity.pub, nonce: conn.myNonce,
     });
   }
@@ -830,6 +903,11 @@ export class Multiplayer {
 
   onHello(conn, f) {
     const info = { ...f };
+    if (info.p === PROTO && info.v !== PROTO_VERSION) {
+      this.onMismatch(info);
+      conn.sock.destroy();
+      return;
+    }
     if (!this.validPeerInfo(info) || info.id === this.id || typeof info.nonce !== 'string') {
       conn.sock.destroy();
       return;
@@ -847,6 +925,7 @@ export class Multiplayer {
     }
     if (!known && remoteIp) c.ip = remoteIp;
     c.seenAt = Date.now();
+    this.noticeFound(c);
 
     if (this.state === 'live' && this.peer && this.peer.id !== c.id) {
       this.sendPlain(conn, { t: 'busy' });

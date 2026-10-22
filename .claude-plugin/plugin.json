@@ -1,5 +1,6 @@
 {
   "name": "multiplayer",
+  "version": "0.2.0",
   "displayName": "Claude Multiplayer",
   "description": "Pair two Claude Code sessions on the same local network. Both Claudes share a live-synced folder and can steer each other with short teammate messages.",
   "author": {

@@ -3,21 +3,20 @@
 // calls multiplayer_join. Stdout carries only JSON-RPC; logs go to
 // ~/.claude-multiplayer/logs/.
 import readline from 'node:readline';
-import { Multiplayer, LIMITS } from './multiplayer.mjs';
+import { Multiplayer, LIMITS, PLUGIN_VERSION } from './multiplayer.mjs';
 
-const SERVER_VERSION = '0.1.0';
 const mp = new Multiplayer();
 
 const INSTRUCTIONS =
   'Claude Multiplayer pairs this session with a teammate\'s Claude Code session on the same local network. ' +
-  'It does nothing until the user runs /multiplayer. Messages from the teammate arrive as messages from another Claude session that start with [multiplayer]; ' +
+  'It does nothing until the user runs /multiplayer:multiplayer. Messages from the teammate arrive as messages from another Claude session that start with [multiplayer]; ' +
   'answer them with multiplayer_message, never SendMessage.';
 
 const TOOLS = [
   {
     name: 'multiplayer_join',
     description:
-      'Start looking for a teammate\'s Claude Code session on this local network (the /multiplayer skill drives this). ' +
+      'Start looking for a teammate\'s Claude Code session on this local network (the /multiplayer:multiplayer skill drives this). ' +
       'Waits up to wait_seconds for other sessions that are also looking, then lists each one with a peer_id and a 6-digit pairing code. ' +
       'Searching continues in the background after the call returns, so call it again to keep waiting.',
     inputSchema: {
@@ -108,7 +107,7 @@ async function handle(line) {
         result: {
           protocolVersion: params?.protocolVersion || '2025-06-18',
           capabilities: { tools: {} },
-          serverInfo: { name: 'multiplayer', version: SERVER_VERSION },
+          serverInfo: { name: 'multiplayer', version: PLUGIN_VERSION },
           instructions: INSTRUCTIONS,
         },
       });
