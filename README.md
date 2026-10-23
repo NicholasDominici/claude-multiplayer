@@ -19,7 +19,7 @@ curl -fsSL https://raw.githubusercontent.com/NicholasDominici/claude-multiplayer
 
 The installer finds Claude Code and Codex on this machine and installs `multiplayer@claude-multiplayer` into each one from this repo's plugin marketplace. Then start a new session. Run the installer again to update.
 
-**Codex, once:** start Codex, open `/hooks`, and trust the three multiplayer hooks. They let teammate messages reach Codex in the middle of a turn. Without them, Codex still works with multiplayer, but sees messages only when it calls a multiplayer tool. The hooks do nothing outside a multiplayer session.
+**Codex, optional:** Codex works with multiplayer as installed: it reads teammate messages each time it calls a multiplayer tool, and checks between steps. To also let a teammate's message interrupt Codex in the middle of a turn, start Codex, open `/hooks`, and trust the three multiplayer hooks. This part is new and not yet verified in a real Codex session. The hooks do nothing outside a multiplayer session.
 
 If you prefer, run the steps yourself.
 
