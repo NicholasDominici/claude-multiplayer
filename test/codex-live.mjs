@@ -16,6 +16,7 @@
 //   --keep       keeps the work folder (Codex transcript and shared folders) for a look afterwards.
 //   --installed  uses your installed plugin and trusted hooks, and tests a mid-turn steer.
 // Env: CODEX_AUTH  path to the auth.json to copy (default: $CODEX_HOME/auth.json or ~/.codex/auth.json)
+//      CODEX_BIN   the codex binary to run (default: codex on PATH), for example the Codex app's own build
 import { spawn, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -37,6 +38,7 @@ function check(name, ok, detail = '') {
 }
 
 function codexBin() {
+  if (process.env.CODEX_BIN) return fs.existsSync(process.env.CODEX_BIN) ? process.env.CODEX_BIN : null;
   try {
     return execFileSync('sh', ['-c', 'command -v codex'], { encoding: 'utf8' }).trim();
   } catch {
@@ -158,7 +160,7 @@ let bobExit = null;
 bob.on('exit', (code) => {
   bobExit = code;
 });
-log(`codex exec started as ${BOB}`);
+log(`codex exec started as ${BOB} (${execFileSync(codex, ['--version'], { encoding: 'utf8' }).trim()})`);
 
 // Pair with Bob once he shows up (up to 3 minutes).
 let bobId = null;
