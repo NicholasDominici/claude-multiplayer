@@ -1,8 +1,8 @@
 {
   "name": "multiplayer",
-  "version": "0.4.0",
-  "displayName": "Claude Multiplayer",
-  "description": "Pair two Claude Code sessions on the same local network. Both Claudes share a live-synced folder and can steer each other with short teammate messages.",
+  "version": "0.5.0",
+  "displayName": "Multiplayer",
+  "description": "Pair two coding agent sessions (Claude Code, Codex or both) on the same local network. Both agents share a live-synced folder and can steer each other with short teammate messages.",
   "author": {
     "name": "Nicholas Dominici"
   },
@@ -22,6 +22,6 @@
       ]
     }
   },
-  "homepage": "https://github.com/NicholasDominici/claude-multiplayer",
-  "repository": "https://github.com/NicholasDominici/claude-multiplayer"
+  "homepage": "https://github.com/NicholasDominici/multiplayer",
+  "repository": "https://github.com/NicholasDominici/multiplayer"
 }

@@ -1,4 +1,4 @@
-// Core of Claude Multiplayer: LAN discovery, pairing, the encrypted peer link,
+// Core of Multiplayer: LAN discovery, pairing, the encrypted peer link,
 // teammate messages, and notices into this agent session (Claude Code, Codex,
 // or any MCP client).
 //
@@ -20,9 +20,11 @@ import { newIdentity, derivePair, seal, open } from './crypto.mjs';
 import { deliverToClaude, findInboxSocket } from './inbox.mjs';
 import { FolderSync } from './sync.mjs';
 
+// The wire id and the key labels in crypto.mjs keep the old name, so new
+// versions still pair with sessions on 0.4 and earlier.
 const PROTO = 'claude-multiplayer';
 const PROTO_VERSION = Number(process.env.MULTIPLAYER_PROTO_VERSION) || 1;
-const UPDATE_COMMAND = 'claude plugin update multiplayer@claude-multiplayer';
+const UPDATE_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/NicholasDominici/multiplayer/main/install.sh | sh';
 const DISCOVERY_PORT = Number(process.env.MULTIPLAYER_DISCOVERY_PORT) || 47823;
 const TCP_PORT = Number(process.env.MULTIPLAYER_TCP_PORT) || 47824;
 const MCAST_GROUP = '239.255.77.77';
@@ -141,6 +143,8 @@ export class Multiplayer {
     this.identity = newIdentity();
     this.name = null;
     this.host = os.hostname().replace(/\.local$/i, '').slice(0, 64);
+    // The state folder keeps the old name: same-machine discovery and the Codex
+    // hooks find sessions through it, including sessions on older versions.
     this.stateDir = process.env.MULTIPLAYER_STATE_DIR || path.join(os.homedir(), '.claude-multiplayer');
     this.beaconDir = path.join(this.stateDir, 'beacons');
     this.logFile = path.join(this.stateDir, 'logs', `${this.id}.log`);
@@ -655,10 +659,10 @@ export class Multiplayer {
 
   /** Says which side must update when a session speaks another protocol version. */
   mismatchText(m) {
-    const theirs = `${m.name} on ${m.host} runs Claude Multiplayer ${m.ver} (protocol ${m.v})`;
+    const theirs = `${m.name} on ${m.host} runs Multiplayer ${m.ver} (protocol ${m.v})`;
     const ours = `this session runs ${PLUGIN_VERSION} (protocol ${PROTO_VERSION})`;
     const who = m.v < PROTO_VERSION ? `${m.name} must update` : 'your user must update';
-    return `${theirs}, but ${ours}, so the two cannot pair. ${who}: update the multiplayer plugin (in Claude Code, run \`${UPDATE_COMMAND}\` in a terminal), start a new session, then start ${START_HINT} again.`;
+    return `${theirs}, but ${ours}, so the two cannot pair. ${who}: run \`${UPDATE_COMMAND}\` in a terminal, start a new session, then start ${START_HINT} again.`;
   }
 
   /** Records a session that speaks another protocol version, and tells the agent once. */
@@ -1242,7 +1246,7 @@ export class Multiplayer {
     }
     if (!this.sharedDir) {
       const [first, second] = this.id < c.id ? [this.name, c.name] : [c.name, this.name];
-      this.sharedDir = this.sharedDirOverride || path.join(os.homedir(), 'claude-multiplayer', `${slug(first)}-${slug(second)}-${c.room}`);
+      this.sharedDir = this.sharedDirOverride || path.join(os.homedir(), 'multiplayer', `${slug(first)}-${slug(second)}-${c.room}`);
     }
     if (!this.sync) {
       try {
@@ -1285,7 +1289,7 @@ export class Multiplayer {
     const text = [
       '# Team notes',
       '',
-      `${this.name} and ${c.name} share this folder through Claude Multiplayer. It syncs live between both machines.`,
+      `${this.name} and ${c.name} share this folder through Multiplayer. It syncs live between both machines.`,
       'Keep this board current. It is the quiet way to coordinate; use messages for things the other agent must know soon.',
       '',
       '## Who is doing what',

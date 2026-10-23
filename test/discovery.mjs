@@ -124,7 +124,7 @@ try {
   const joinF = await F.call('multiplayer_join', { wait_seconds: 6 });
   check('newer peer is not listed as a candidate', !/name: Erin/.test(joinF.text), joinF.text);
   check('older side is told that it must update', /Version problem: Erin .*protocol 2.* your user must update/.test(joinF.text), joinF.text);
-  check('update command is named', /claude plugin update multiplayer@claude-multiplayer/.test(joinF.text), joinF.text);
+  check('update command is named', /curl -fsSL https:\/\/raw\.githubusercontent\.com\/NicholasDominici\/multiplayer\/main\/install\.sh \| sh/.test(joinF.text), joinF.text);
   const noticeE = await waitFor(() => E.inbox.users().find((u) => /cannot pair/.test(u.message.content)));
   check('newer side gets a notice that the teammate must update', /Frank must update/.test(noticeE?.message.content ?? ''), JSON.stringify(noticeE));
 } finally {

@@ -1,4 +1,4 @@
-// MCP stdio server for Claude Multiplayer. The agent (Claude Code, Codex or any
+// MCP stdio server for Multiplayer. The agent (Claude Code, Codex or any
 // MCP client) starts one per session. It stays idle (no network use) until the
 // user starts the multiplayer skill and the agent calls multiplayer_join. Stdout carries only JSON-RPC; logs go to
 // ~/.claude-multiplayer/logs/.
@@ -8,7 +8,7 @@ import { Multiplayer, LIMITS, PLUGIN_VERSION } from './multiplayer.mjs';
 const mp = new Multiplayer();
 
 const INSTRUCTIONS =
-  'Claude Multiplayer pairs this session with a teammate\'s coding agent session (Claude Code, Codex or another MCP client) on the same local network. ' +
+  'Multiplayer pairs this session with a teammate\'s coding agent session (Claude Code, Codex or another MCP client) on the same local network. ' +
   'It does nothing until the user starts the multiplayer skill. Messages from the teammate start with [multiplayer]; ' +
   'answer them with multiplayer_message, never another messaging tool.' +
   (mp.delivery === 'pull'
@@ -26,7 +26,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Name to show the teammate, normally your user\'s first name. Defaults to the git user name.' },
-        shared_dir: { type: 'string', description: 'Absolute path for the shared folder on this machine. Default: ~/claude-multiplayer/<pair-name>.' },
+        shared_dir: { type: 'string', description: 'Absolute path for the shared folder on this machine. Default: ~/multiplayer/<pair-name>.' },
         address: { type: 'string', description: 'Teammate address as "ip" or "ip:port", only when automatic discovery fails.' },
         wait_seconds: { type: 'integer', minimum: 0, maximum: 110, description: 'How long to wait for a session to appear. Default 40.' },
       },

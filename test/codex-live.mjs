@@ -82,7 +82,7 @@ if (!installed) {
   fs.copyFileSync(authSrc, path.join(codexHome, 'auth.json'));
   fs.chmodSync(path.join(codexHome, 'auth.json'), 0o600);
   execFileSync(codex, ['plugin', 'marketplace', 'add', root], { env: codexEnv, stdio: 'ignore' });
-  execFileSync(codex, ['plugin', 'add', 'multiplayer@claude-multiplayer'], { env: codexEnv, stdio: 'ignore' });
+  execFileSync(codex, ['plugin', 'add', 'multiplayer@multiplayer'], { env: codexEnv, stdio: 'ignore' });
 }
 
 // Claude Code side: the real server with a fake inbox socket, driven by this script.

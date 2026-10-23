@@ -1,6 +1,6 @@
 {
-  "name": "claude-multiplayer",
-  "description": "Claude Multiplayer: pair two Claude Code sessions on the same local network.",
+  "name": "multiplayer",
+  "description": "Multiplayer: pair two coding agents (Claude Code or Codex) on the same local network.",
   "owner": {
     "name": "Nicholas Dominici"
   },
@@ -8,7 +8,7 @@
     {
       "name": "multiplayer",
       "source": "./",
-      "description": "Pair two Claude Code sessions on the same local network: a live shared folder plus teammate messages that steer the other Claude."
+      "description": "Pair two coding agents (Claude Code or Codex) on the same local network: a live shared folder plus teammate messages that steer the other agent."
     }
   ]
 }

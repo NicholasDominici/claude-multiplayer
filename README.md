@@ -1,10 +1,10 @@
-# Claude Multiplayer
+# Multiplayer
 
 Pair two coding agent sessions on the same local network: Claude Code with Claude Code, Codex with Codex, or Claude Code with Codex. Each person keeps their own agent, and the two agents work as a team:
 
 - **Find each other:** both people start multiplayer (`/multiplayer:multiplayer` in Claude Code, `$multiplayer` in Codex). The sessions find each other on the LAN with no setup.
 - **Confirm the pair:** each screen shows the same 6-digit code. Each user confirms it, and only then does the link open.
-- **Share a folder:** `~/claude-multiplayer/<pair-name>/` syncs live in both directions, and includes a `NOTES.md` coordination board.
+- **Share a folder:** `~/multiplayer/<pair-name>/` syncs live in both directions, and includes a `NOTES.md` coordination board.
 - **Steer each other:** `multiplayer_message` sends a short note to the other agent. A `steer` arrives between the agent's tool calls, and an `fyi` waits until its turn ends. Codex needs its multiplayer hooks trusted once for this (see Install); until then it reads messages when it calls a multiplayer tool. The server limits how often an agent can send, so the two agents talk like two coworkers and do not interrupt each other all day.
 
 ## Install
@@ -14,10 +14,10 @@ Requirements: macOS or Linux, Node.js 18 or newer, and Claude Code 2.1.224 or ne
 Run this in a terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NicholasDominici/claude-multiplayer/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/NicholasDominici/multiplayer/main/install.sh | sh
 ```
 
-The installer finds Claude Code and Codex on this machine and installs `multiplayer@claude-multiplayer` into each one from this repo's plugin marketplace. Then start a new session. Run the installer again to update.
+The installer finds Claude Code and Codex on this machine and installs `multiplayer@multiplayer` into each one from this repo's plugin marketplace. Then start a new session. Run the installer again to update.
 
 **Codex, optional:** Codex works with multiplayer as installed: it reads teammate messages each time it calls a multiplayer tool, and checks between steps. To also let a teammate's message interrupt Codex in the middle of a turn, start Codex, open `/hooks`, and trust the three multiplayer hooks. This part is new and not yet verified in a real Codex session. The hooks do nothing outside a multiplayer session.
 
@@ -26,16 +26,18 @@ If you prefer, run the steps yourself.
 Claude Code:
 
 ```bash
-claude plugin marketplace add https://github.com/NicholasDominici/claude-multiplayer.git && claude plugin install multiplayer@claude-multiplayer
+claude plugin marketplace add https://github.com/NicholasDominici/multiplayer.git && claude plugin install multiplayer@multiplayer
 ```
 
 Codex:
 
 ```bash
-codex plugin marketplace add https://github.com/NicholasDominici/claude-multiplayer.git && codex plugin add multiplayer@claude-multiplayer
+codex plugin marketplace add https://github.com/NicholasDominici/multiplayer.git && codex plugin add multiplayer@multiplayer
 ```
 
 Both of you need compatible versions. If one side is too old, multiplayer says who must update.
+
+Up to 0.4 this project was called Claude Multiplayer, and the plugin was `multiplayer@claude-multiplayer`. The installer removes that copy and installs `multiplayer@multiplayer`. The old GitHub address still redirects here.
 
 Earlier versions installed into `~/.claude/skills/multiplayer`. The installer moves that copy to `~/.claude-multiplayer/backups/`, because two copies of the plugin conflict.
 

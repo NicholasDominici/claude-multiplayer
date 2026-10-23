@@ -50,7 +50,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   res.writeHead(404, { 'content-type': 'text/plain' });
-  res.end(`Claude Multiplayer. Install with:\n  curl -fsSL http://${hostHeader}/install.sh | sh\n`);
+  res.end(`Multiplayer. Install with:\n  curl -fsSL http://${hostHeader}/install.sh | sh\n`);
 });
 
 server.on('error', (err) => {
@@ -58,7 +58,7 @@ server.on('error', (err) => {
   process.exit(1);
 });
 server.listen(port, '0.0.0.0', () => {
-  console.log('Claude Multiplayer share server is running.');
+  console.log('Multiplayer share server is running.');
   console.log('Your teammate runs ONE of these in their terminal:');
   for (const ip of ips) console.log(`  curl -fsSL http://${ip}:${port}/install.sh | sh`);
   console.log(`It stops after ${minutes} minutes. Press Ctrl+C to stop it now.`);
